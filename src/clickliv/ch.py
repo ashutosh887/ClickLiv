@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -14,6 +15,14 @@ from pathlib import Path
 
 class ClickHouseError(RuntimeError):
     pass
+
+
+SECRETS = re.compile(r"(PASSWORD|IDENTIFIED\s+(?:WITH\s+\w+\s+)?BY)\s*'[^']*'", re.IGNORECASE)
+
+
+def redact(sql: str) -> str:
+    """Strip credentials before SQL reaches an error, a log or a trace."""
+    return SECRETS.sub(r"\1 '[redacted]'", sql)
 
 
 @dataclass
@@ -88,7 +97,8 @@ class ClickHouse:
                 return resp.read(), qid
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace").strip()
-            raise ClickHouseError(f"{e.code} on query {qid}\n{detail}\n---\n{sql[:2000]}") from None
+            raise ClickHouseError(
+                f"{e.code} on query {qid}\n{redact(detail)}\n---\n{redact(sql)[:2000]}") from None
 
     def command(self, sql: str, settings: dict | None = None,
                 database: str | None = None, query_id: str | None = None) -> str:
