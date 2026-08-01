@@ -7,9 +7,6 @@ from pathlib import Path
 
 from .ch import ClickHouse
 
-DIMS = ("country", "platform", "video_type", "category", "app_version",
-        "player_version", "audio_language", "subtitle_language", "content_id")
-
 SLICES = {
     "no filter": "1",
     "platform ANDROID_PHONE": "platform = 'ANDROID_PHONE'",
