@@ -143,6 +143,24 @@
   .tool b { font-size: 15.5px; font-weight: 620; letter-spacing: -0.01em; }
   .tool span { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
   .tool:hover { background: var(--soft); }
+  .tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
+    gap: 10px; background: none; border: 0; }
+  .tool { background: var(--bg); border: 1px solid var(--line); border-radius: 9px;
+    padding: 14px 16px; display: flex; gap: 11px; align-items: flex-start; }
+  .tool:hover { border-color: var(--ink); }
+  .tool > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .tool b { font-size: 14.5px; font-weight: 620; letter-spacing: -0.01em; }
+  .tool span { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+  .mk { width: 26px; height: 26px; flex: 0 0 26px; border-radius: 6px; background: var(--soft);
+    border: 1px solid var(--line); padding: 4px; object-fit: contain; }
+  .mk.mono { display: inline-flex; align-items: center; justify-content: center; padding: 0;
+    font-size: 10.5px; font-weight: 680; letter-spacing: -0.02em; background: var(--yellow);
+    border-color: var(--yellow); color: var(--ink); }
+  .card { position: relative; }
+  .card .tag { position: absolute; top: 13px; right: 14px; font-size: 10.5px;
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; background: var(--bg); }
+  .card h3 { padding-right: 96px; }
 </style>
 </head>
 <body>
@@ -280,33 +298,33 @@
     <h2>Live surfaces</h2>
     <div class="cards">
       <a class="card" href="/dashboard">
-        <h3>Concurrency dashboard</h3>
+        <span class="tag">ClickHouse</span><h3>Concurrency dashboard</h3>
         <p>The curve and every filter, read live through the same parameterized view every other
         consumer uses. Proves the serving layer answers arbitrary slices at minute grain.</p>
         <div class="host">clickliv.vercel.app/dashboard</div>
       </a>
       <a class="card" href="https://librechat.15-252-63-157.sslip.io">
-        <h3>LibreChat</h3>
+        <span class="tag">MCP</span><h3>LibreChat</h3>
         <p>Ask the same questions in plain language. Proves a warehouse is safe to point a model at,
         through pre-vetted MCP tools whose filter values are checked against the data itself.</p>
         <div class="host">librechat.15-252-63-157.sslip.io</div>
       </a>
       <a class="card" href="https://langfuse.15-252-63-157.sslip.io">
-        <h3>Langfuse</h3>
+        <span class="tag">ClickHouse</span><h3>Langfuse</h3>
         <p>Every model and tool call traced. Proves the observability pillar is a second ClickHouse
         workload, with traces in ClickHouse Cloud and transactional state in ClickHouse managed
         Postgres.</p>
         <div class="host">langfuse.15-252-63-157.sslip.io</div>
       </a>
       <a class="card" href="https://clickstack.15-252-63-157.sslip.io">
-        <h3>ClickStack</h3>
+        <span class="tag">OpenTelemetry</span><h3>ClickStack</h3>
         <p>One span per pipeline stage, per ingest and per query, carrying what the server itself
         recorded. Proves the latency figures are read from <code>system.query_log</code> rather
         than from a client stopwatch.</p>
         <div class="host">clickstack.15-252-63-157.sslip.io</div>
       </a>
       <a class="card" href="https://github.com/ashutosh887/ClickLiv">
-        <h3>Source and evidence</h3>
+        <span class="tag">MIT</span><h3>Source and evidence</h3>
         <p>The SQL, the gates, the answer bundle and a manifest with a hash per file. Proves every
         number here is reproducible from a clean clone in two commands.</p>
         <div class="host">github.com/ashutosh887/ClickLiv</div>
@@ -358,16 +376,16 @@
   <section id="stack">
     <h2>Built on</h2>
     <div class="tools">
-      <div class="tool"><b>ClickHouse Cloud</b><span>Every interval, rollup and served answer</span></div>
-      <div class="tool"><b>chDB</b><span>The same numbers in process, no server</span></div>
-      <div class="tool"><b>ClickStack</b><span>A span per stage, ingest and query</span></div>
-      <div class="tool"><b>Langfuse</b><span>Every model and tool call traced</span></div>
-      <div class="tool"><b>LibreChat</b><span>The conversational surface</span></div>
-      <div class="tool"><b>MCP</b><span>Pre-vetted tools over curated marts</span></div>
-      <div class="tool"><b>OpenAI</b><span>The model behind the desk</span></div>
-      <div class="tool"><b>AWS Bedrock</b><span>The fallback model path</span></div>
-      <div class="tool"><b>EC2 and Caddy</b><span>The three self-hosted surfaces, on HTTPS</span></div>
-      <div class="tool"><b>Vercel</b><span>This page and its serverless reads, in Mumbai</span></div>
+      <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/clickhouse.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>ClickHouse Cloud</b><span>Every interval, rollup and served answer</span></div></div>
+      <div class="tool"><span class="mk mono">ch</span><div><b>chDB</b><span>The same numbers in process, no server</span></div></div>
+      <div class="tool"><span class="mk mono">CS</span><div><b>ClickStack</b><span>A span per stage, ingest and query</span></div></div>
+      <div class="tool"><span class="mk mono">Lf</span><div><b>Langfuse</b><span>Every model and tool call traced</span></div></div>
+      <div class="tool"><span class="mk mono">LC</span><div><b>LibreChat</b><span>The conversational surface</span></div></div>
+      <div class="tool"><span class="mk mono">MC</span><div><b>MCP</b><span>Pre-vetted tools over curated marts</span></div></div>
+      <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/openai.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>OpenAI</b><span>The model behind the desk</span></div></div>
+      <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/amazonwebservices.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>AWS Bedrock</b><span>The fallback model path</span></div></div>
+      <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/caddy.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>EC2 and Caddy</b><span>Self-hosted surfaces on HTTPS</span></div></div>
+      <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/vercel.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>Vercel</b><span>This page and its reads, in Mumbai</span></div></div>
     </div>
   </section>
 
