@@ -48,9 +48,12 @@ it rehearses.
 `make chdb` needs no server at all. It builds the entire pipeline inside the Python process
 with chDB and checks it against the served tables:
 
+Against the ClickHouse Cloud service:
+
 ```
-chDB 26.5.1.1 built the whole pipeline in-process in 2.0s, no server
-server is ClickHouse 26.7.1.1315
+chDB 26.5.1.1 built the whole pipeline in-process in 1.8s, no server
+
+server is ClickHouse 26.4.1.2029
 
 PASS  minute_occupancy     96,818 rows  hash 8231330d0e0603ee
 PASS  minute_deltas        33,748 rows  hash 2d7c0e268430f7ee
@@ -59,8 +62,22 @@ PASS  active_intervals     32,164 rows  hash 1f6726b4cec03404
 Gate D: PASS  chDB agrees with the server
 ```
 
-Same SQL files, two ClickHouse runtimes, two ClickHouse versions, identical hashes. The
-portability is not a claim, it is a target you can run.
+Point `.env` at local Docker instead and the same command prints `server is ClickHouse
+26.7.1.1315` above the same three hashes. Three ClickHouse versions run this project,
+and each one is stated with the environment it came from: **26.4.1.2029** on the Cloud
+service, **26.7.1.1315** in local Docker, **26.5.1.1** for embedded chDB. The hashes are
+`groupBitXor` over `cityHash64`, which is order independent, so they pin the contents of
+the serving tables and nothing about how those rows happen to be laid out on disk.
+
+Same SQL files, three ClickHouse runtimes, three ClickHouse versions, identical hashes.
+The portability is not a claim, it is a target you can run.
+
+One capability differs across those versions and the docs say which side of it they are
+on. Runnable `EXPLAIN ANALYZE` needs 26.7 or newer, so it works against local Docker and
+fails as a syntax error, not a runtime error, against Cloud's 26.4. `answers.py` catches
+that and records the reason in the evidence file rather than dropping the section, which
+is why `evidence/explain_*.txt` from a Cloud run carries the `EXPLAIN indexes = 1` plan
+and an explicit note in place of the `EXPLAIN ANALYZE` one.
 
 ## Threshold sensitivity
 

@@ -15,9 +15,11 @@ answers/latencies.csv           the same queries' query_duration_ms, read_rows,
                                  clock (D14)
 evidence/query_log.csv          the same query_log rows again, as the artifact a
                                  judge can check against a query_id
-evidence/explain_*.txt          EXPLAIN indexes=1 and EXPLAIN ANALYZE for the
-                                 unfiltered day-grain query, showing the granule
-                                 count against minute_occupancy directly
+evidence/explain_*.txt          EXPLAIN indexes=1 for the unfiltered day-grain
+                                 query, showing the granule count against
+                                 minute_occupancy directly, plus EXPLAIN ANALYZE
+                                 where the server is 26.7 or newer and the
+                                 reason it is absent where it is not
 evidence/oracle_match.csv       occupancy peak, maxIntersections, and the Python
                                  reference's independent numbers, side by side
 ```
