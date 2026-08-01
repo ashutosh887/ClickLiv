@@ -75,6 +75,56 @@ Gate D: PASS  chDB agrees with the server
 Same SQL files, two ClickHouse runtimes, two ClickHouse versions, identical hashes. The
 portability is not a claim, it is a target you can run.
 
+## Observability
+
+ClickStack is the OSS pillar. It runs beside the pipeline, never inside it.
+
+```sh
+make obs-up      # all-in-one: OTLP on 4317 and 4318, HyperDX on 8080, its ClickHouse on 8124
+make all
+make obs         # read the trace back out of ClickStack
+```
+
+Set `CLICKSTACK_OTLP` and `CLICKSTACK_KEY` in `.env`, the key being the ingestion key from
+Team Settings at `localhost:8080`. Leave `CLICKSTACK_OTLP` unset and tracing is a no-op:
+no network call, byte-identical output. The exporter is OTLP over JSON on the standard
+library, so the project still has **zero Python dependencies**.
+
+Each run emits one trace: a root span for the command, a span per pipeline stage, a span
+per ingest, and a span per ClickHouse query. The query spans deliberately do not report
+client wall clock. Before export the tracer issues `SYSTEM FLUSH LOGS`, reads
+`system.query_log` for the query ids it collected, and attaches what the server itself
+recorded (D14):
+
+```
+stages
+  SpanName             spans  ms
+  clickliv.all         1      5440.1
+  stage.reference      1      2372.9
+  stage.load           1      1843.8
+  ingest.raw_events    1      1742.1
+  stage.verify         1      467
+  stage.occupancy      1      435.8
+  stage.sessionize     1      225.8
+  stage.deltas         1      77.2
+
+queries by rows read, server side
+  server_ms  read_rows  read_bytes  statement
+  45         3622235    135833299   SELECT (SELECT count() FROM raw_events) ...
+  314        937722     85082999    INSERT INTO session_minutes WITH covered AS ...
+  1736       905558     265203213   INSERT INTO raw_events SELECT video_session_id ...
+  212        905558     69731258    INSERT INTO active_intervals WITH 90 * 1000 AS gap_ms ...
+```
+
+Ingest spans carry `ingest.rows`, `ingest.bytes`, `ingest.duration_ms`, and
+`ingest.visible_lag_ms`, the delay between the insert being acknowledged and the rows
+being queryable. It is 3.3ms for 905,558 rows here, which is the honest answer for
+synchronous MergeTree inserts and the panel that would move first on a live feeder.
+
+`make obs` reads that telemetry back out of the ClickHouse that ClickStack stores it in,
+over the same client that runs the pipeline. ClickHouse is the analytical engine on both
+sides of the integration.
+
 ## The active rule
 
 A session is active at time `t` when it is playing **and** foregrounded **and**
@@ -188,6 +238,9 @@ src/clickliv/reference.py  ground truth, reads the CSV directly
 src/clickliv/verify.py     Gate A
 src/clickliv/gates.py      Gate B
 src/clickliv/sweep.py      threshold sensitivity grid
+src/clickliv/otel.py       OTLP exporter, spans carry server-side query metrics
+src/clickliv/observe.py    reads the trace back out of ClickStack
+observability/            read-only user for the ClickStack ClickHouse
 ```
 
 Thresholds and credentials are `${VAR}` placeholders in the SQL, substituted from the
