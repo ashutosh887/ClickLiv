@@ -212,6 +212,12 @@ def step_decline(ch: ClickHouse) -> int:
     return 0 if decline.run(ch, Path("evidence")) else 1
 
 
+def step_incremental(ch: ClickHouse) -> int:
+    from . import incremental
+    Path("evidence").mkdir(exist_ok=True)
+    return 0 if incremental.run(ch, Path("evidence")) else 1
+
+
 def step_obs(ch: ClickHouse) -> int:
     from . import observe
     return observe.report()
@@ -254,6 +260,7 @@ STEPS = {
     "userlevel": step_userlevel,
     "crossover": step_crossover,
     "decline": step_decline,
+    "incremental": step_incremental,
     "obs": step_obs,
     "reset": step_reset,
 }

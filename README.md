@@ -63,6 +63,7 @@ make scale       # O7: sharding and read-cost proofs at 1x/10x/100x, evidence/sc
 make userlevel   # O4: session-level vs user-level concurrency, evidence/user_level.txt
 make crossover   # the problem statement's own dimension-crossover example, measured
 make decline     # optional: deterministic concurrency-decline alerting
+make incremental # a real open session absorbs a new heartbeat live, proven vs batch
 ```
 
 `make all` runs CSV to Gate A in about 8 seconds. The same commands run unchanged against
@@ -301,6 +302,27 @@ session-minute grain is structural and does not erode as the table grows; under 
 growth, where sessions gain more events rather than being cloned wholesale, the serving
 table grows slower than raw events and this ratio would widen further.
 
+## Update handling, proven live
+
+"Update handling" is one of the five named evaluation criteria: "sessions in the
+dataset include ones still open when the day ends and heartbeats that keep arriving.
+Judges will look at how your serving layer absorbs them: incrementally, or by
+recomputing?" The served tables (`minute_occupancy`, `minute_deltas`) are a full,
+idempotent rebuild by default (D9, D13), gated for correctness but not incremental.
+
+`make incremental` adds a real, narrowly-scoped incremental path for exactly the
+scenario the problem statement names: an already-open session receiving a new
+heartbeat. A `ReplacingMergeTree` table, `open_session_state`, tracks sessions known
+to still be open; a materialized view, `mv_extend_open_session`, fires on every
+insert into `raw_events` and extends the tracked state live, with no rebuild, when a
+later, non-closing event lands within the gap threshold. The proof: pick a real
+session that is genuinely open at data end, insert one synthetic heartbeat, read the
+live state (no rebuild), then run the full batch sessionizer from scratch and
+compare. Measured: the two agree to the millisecond. `evidence/incremental_update.txt`.
+
+Both objects are dropped after the run, same leave-no-trace discipline as Gate C, so
+this does not become a permanent tax on every other command's inserts.
+
 ## Dimension crossover and decline alerting
 
 The problem statement gives its own worked example: "platform and a content might
@@ -452,6 +474,8 @@ src/clickliv/ui.py           the minimal concurrency dashboard
 src/clickliv/userlevel.py    O4, session-level vs user-level concurrency, measured
 src/clickliv/crossover.py    the problem statement's dimension-crossover example
 src/clickliv/decline.py      optional: deterministic concurrency-decline alerting
+sql/08_incremental.sql       open_session_state, mv_extend_open_session
+src/clickliv/incremental.py  proves the incremental path agrees with a batch rebuild
 src/clickliv/cli.py          command dispatch, identical for local and Cloud
 src/clickliv/ch.py           zero-dependency ClickHouse HTTP client
 src/clickliv/load.py         CSV ingestion, content before events
