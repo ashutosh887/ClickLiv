@@ -84,6 +84,10 @@ FROM marts.v_overcount;
 
 Expect 1 row: `2692`, `2026-07-26 10:56:00`, `3743`, `2026-07-26 10:59:00`, `39`, `49`.
 
+**Visualization type: Table.** Six columns and one row. Big Stat renders a single value,
+so it would drop the two peak timestamps, and those timestamps landing three minutes
+apart are half the point of the tile.
+
 ### 2. naive_vs_foreground
 
 ```sql
@@ -105,6 +109,11 @@ naive span count charges for them and foreground occupancy does not. That is the
 being measured. The remaining 3,649 minutes are exactly the row count of query 3, which
 is a useful internal consistency check.
 
+**Visualization type: Line.** Two series on one pair of axes: x is `ts`, and drag BOTH
+`foreground_concurrency` and `naive_concurrency` onto y. If they land on separate charts
+the tile has lost its entire point. Do not use Stacked bar here, since stacking would add
+the two series together and the whole claim is that one sits above the other.
+
 ### 3. concurrency_over_time
 
 The answer on its own, through the parameterized view the MCP tools and the API also
@@ -124,6 +133,10 @@ ORDER BY minute;
 Expect 3,649 rows. Starts at 1 on 2026-07-14 15:43 UTC, stays low for most of the
 window, climbs to a single sharp spike on 2026-07-26 topping out at **2,692** at 10:56
 UTC, and falls to 7 by 11:30 UTC. If the peak reads 2,692 the tile is correct.
+
+**Visualization type: Area.** x is `ts`, y is `concurrency`. Area over Line here because
+this is one series and the filled shape makes the single sharp spike read from across a
+room. Line is a fine second choice if Area renders badly.
 
 ### 4. peak_by_platform
 
@@ -147,6 +160,11 @@ Expect 10 rows. `ANDROID_PHONE` leads at **1,704**, then IPHONE 329, SONY_ANDROI
 XIAOMI_ANDROID_TV 37, LG_HTML_TV 22. One tall bar and a long tail. The ten per-platform
 peaks sum to more than 2,692 because platforms peak in different minutes, which is the
 same effect the dashboard is about, one level down.
+
+**Visualization type: Bar Chart.** x is `platform`, y is `peak_concurrency`. Leave
+`peak_at` out of the axes; it stays in the underlying data without being plotted. If the
+ten labels crowd each other at half width, switch to Horizontal bar, which gives the
+platform names room to read.
 
 ### 5. peak_by_video_type
 
@@ -179,6 +197,11 @@ tops out at 10:42, and vod carries the load to a much higher peak at 11:02. The 
 row has an empty `video_type` and is a real property of the source data rather than a
 bug. Leave it in.
 
+**Visualization type: Table.** A bar chart would plot the two peak heights and silently
+drop `peak_at`, and `peak_at` is the entire finding here. Resist Pie in particular: these
+are peaks in different minutes, not parts of a whole, so a pie would state something
+untrue.
+
 ### 6. serving_latency
 
 ```sql
@@ -206,6 +229,8 @@ numbers come off both replicas rather than whichever one the console happened to
 to, which is why this reads `clusterAllReplicas` instead of `system.query_log` directly.
 And p99 stays comfortably under 200 ms.
 
+**Visualization type: Table.** One row, seven columns, no time axis to plot.
+
 If `replicas_reporting` comes back 1 the service scaled down to a single replica. If
 `queries` comes back 0 the query log rotated, so run query 3 once and refresh the tile.
 
@@ -227,8 +252,8 @@ Add them top to bottom. The order is the argument.
 | --- | --- | --- | --- | --- | --- |
 | 1 | `overcount_headline` | Table | none | full | 3,743 against 2,692, 39 percent, three minutes apart |
 | 2 | `naive_vs_foreground` | Line | x `ts`, y `foreground_concurrency` and `naive_concurrency` | full | the same claim drawn, minute by minute |
-| 3 | `concurrency_over_time` | Line | x `ts`, y `concurrency` | full | the answer on its own, one clean curve to 2,692 |
-| 4 | `peak_by_platform` | Bar | x `platform`, y `peak_concurrency` | half, left | mobile carries the event |
+| 3 | `concurrency_over_time` | Area | x `ts`, y `concurrency` | full | the answer on its own, one clean curve to 2,692 |
+| 4 | `peak_by_platform` | Bar Chart | x `platform`, y `peak_concurrency` | half, left | mobile carries the event |
 | 5 | `peak_by_video_type` | Table | none | half, right | live peaks 20 minutes before vod |
 | 6 | `serving_latency` | Table | none | full | p99 under 150 ms across both replicas |
 
@@ -245,8 +270,10 @@ Suggested titles, if you want them to read as an argument rather than as column 
 5. Live peaks 20 minutes before vod
 6. Serving latency across both replicas
 
-If the console offers a single value, number or metric chart type, use it for tile 1
-with `peak_overcount_pct` as the value. A table is the safe fallback and it fits.
+The dropdown offers Big Stat, Table, Bar Chart, Stacked bar, Horizontal bar, Stacked H.
+bar, Line, Area, Pie, Doughnut, Scatter and Heatmap. Only the six named above are worth
+using here. Big Stat is tempting for tile 1 but it renders one value, so it would drop
+the two peak timestamps that make the point.
 
 ## Optional seventh tile
 
