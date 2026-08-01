@@ -158,6 +158,11 @@ def step_marts(ch: ClickHouse) -> int:
     return 0
 
 
+def step_answers(ch: ClickHouse) -> int:
+    from . import answers
+    return 0 if answers.run(ch, artifacts_dir()) else 1
+
+
 def step_obs(ch: ClickHouse) -> int:
     from . import observe
     return observe.report()
@@ -192,6 +197,7 @@ STEPS = {
     "sweep": step_sweep,
     "chdb": step_chdb,
     "marts": step_marts,
+    "answers": step_answers,
     "obs": step_obs,
     "reset": step_reset,
 }
