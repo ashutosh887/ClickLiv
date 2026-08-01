@@ -60,6 +60,7 @@ make sweep       # threshold sensitivity grid
 make chdb        # same SQL in-process on chDB, no server at all
 make gate-c      # held-out single-day dry run, evidence in answers/gate_c and evidence/gate_c
 make scale       # O7: sharding and read-cost proofs at 1x/10x/100x, evidence/scale.txt
+make userlevel   # O4: session-level vs user-level concurrency, evidence/user_level.txt
 ```
 
 `make all` runs CSV to Gate A in about 8 seconds. The same commands run unchanged against
@@ -298,6 +299,20 @@ session-minute grain is structural and does not erode as the table grows; under 
 growth, where sessions gain more events rather than being cloned wholesale, the serving
 table grows slower than raw events and this ratio would widen further.
 
+## Session-level or user-level concurrency
+
+The data dictionary says user-level concurrency can be derived from `user_id`. The
+serving layer stays session-level by default; `make userlevel` measures the
+alternative instead of asserting it, writing `evidence/user_level.txt`. At the peak
+minute, 2,692 concurrent sessions resolve to 2,626 concurrent users, exact and
+HyperLogLog agreeing to 0.00% error at this cardinality. The 66-session gap is
+explained entirely by 784 users running more than one concurrent session, a second
+device on an account already counted, not by noise. That also confirms `uniq` /
+`uniqState` / `uniqMerge` reproduces `uniqExact` exactly here, so it is a bounded,
+mergeable choice if user-level concurrency is ever asked for. No second persisted
+serving table was built for a metric nobody asked for; this diagnostic proves the
+design choice is sound and stops there.
+
 ## The active rule
 
 A session is active at time `t` when it is playing **and** foregrounded **and**
@@ -413,6 +428,7 @@ src/clickliv/projections.py  before/after/forced EXPLAIN, query_log confirmation
 src/clickliv/gate_c.py       Gate C, the held-out single-day dry run
 src/clickliv/scale.py        O7, the sharding and read-cost proofs at scale
 src/clickliv/ui.py           the minimal concurrency dashboard
+src/clickliv/userlevel.py    O4, session-level vs user-level concurrency, measured
 src/clickliv/cli.py          command dispatch, identical for local and Cloud
 src/clickliv/ch.py           zero-dependency ClickHouse HTTP client
 src/clickliv/load.py         CSV ingestion, content before events

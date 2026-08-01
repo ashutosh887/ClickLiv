@@ -194,6 +194,12 @@ def step_ui(ch: ClickHouse) -> int:
     return 0
 
 
+def step_userlevel(ch: ClickHouse) -> int:
+    from . import userlevel
+    Path("evidence").mkdir(exist_ok=True)
+    return 0 if userlevel.run(ch, Path("evidence")) else 1
+
+
 def step_obs(ch: ClickHouse) -> int:
     from . import observe
     return observe.report()
@@ -233,6 +239,7 @@ STEPS = {
     "projections": step_projections,
     "scale": step_scale,
     "ui": step_ui,
+    "userlevel": step_userlevel,
     "obs": step_obs,
     "reset": step_reset,
 }
