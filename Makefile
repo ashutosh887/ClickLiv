@@ -3,7 +3,7 @@ CLI := uv run --quiet python -m clickliv
 .PHONY: up down logs obs obs-up obs-down obs-logs ping schema load reconcile \
         sessionize occupancy deltas reference verify pipeline all gate-b gate-c \
         sweep chdb marts answers projections scale ui userlevel crossover decline \
-        incremental instantaneous submission replay mcp test reset \
+        incremental instantaneous submission replay mcp test data fixture fixture-pipeline reset \
         llm-up llm-down llm-logs chat-up chat-down chat-logs
 
 up:
@@ -131,6 +131,15 @@ chat-logs:
 
 test:
 	uv run --quiet python -m unittest discover -s tests -v
+
+data:
+	uv run --quiet python tools/fetch_data.py
+
+fixture:
+	uv run --quiet python tools/make_fixture.py
+
+fixture-pipeline:
+	uv run --quiet --extra embedded python -m unittest tests.test_fixture_pipeline -v
 
 reset:
 	$(CLI) reset

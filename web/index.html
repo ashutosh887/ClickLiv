@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClickLiv, foreground-only concurrency</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa; --panel: #ffffff; --line: #e3e2df; --ink: #16150f;
+    --muted: #6b6a63; --accent: #d4491f; --grid: #efeeeb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14140f; --panel: #1c1c17; --line: #2e2e27; --ink: #f2f1ea;
+      --muted: #97958c; --accent: #ff6b3d; --grid: #26261f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 22px 64px; }
+  header { border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 26px; }
+  h1 { font-size: 22px; letter-spacing: -0.01em; margin: 0 0 6px; font-weight: 620; }
+  .sub { color: var(--muted); margin: 0; max-width: 62ch; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 24px 0; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .stat .k { color: var(--muted); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .stat .v { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .stat .v.accent { color: var(--accent); }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+  label { color: var(--muted); font-size: 13px; }
+  select {
+    font: inherit; font-size: 14px; padding: 7px 10px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  }
+  .chart { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; }
+  svg { display: block; width: 100%; height: auto; }
+  .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .gridline { stroke: var(--grid); stroke-width: 1; }
+  .area { fill: var(--accent); opacity: 0.12; }
+  .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+  footer { margin-top: 26px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 18px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  a { color: inherit; }
+  .status { color: var(--muted); font-size: 13px; min-height: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ClickLiv</h1>
+    <p class="sub">Foreground-only concurrency for SonyLIV streaming telemetry. A viewer counts
+    only while playing, foregrounded and heartbeat-fresh. Every number below is read live from
+    ClickHouse Cloud through one parameterized view.</p>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="k">Peak, foreground only</div><div class="v accent" id="peak">&hellip;</div></div>
+    <div class="stat"><div class="k">Naive, any open session</div><div class="v">3,743</div></div>
+    <div class="stat"><div class="k">Overcount avoided</div><div class="v">38.5%</div></div>
+    <div class="stat"><div class="k">Serving p99</div><div class="v">30 ms</div></div>
+  </div>
+
+  <div class="controls">
+    <label for="platform">Platform</label>
+    <select id="platform"><option value="">All platforms</option></select>
+    <label for="videoType">Type</label>
+    <select id="videoType"><option value="">All types</option></select>
+    <label for="grain">Grain</label>
+    <select id="grain">
+      <option value="hour" selected>Hour</option>
+      <option value="minute">Minute</option>
+      <option value="day">Day</option>
+    </select>
+  </div>
+
+  <div class="chart"><svg id="chart" viewBox="0 0 940 340" preserveAspectRatio="none"></svg></div>
+  <p class="status" id="status">Loading&hellip;</p>
+
+  <footer>
+    Served by <code>marts.v_concurrency</code> as <code>marts_agent</code>, a read-only role with a
+    ClickHouse-enforced query budget. The browser never receives a database credential.
+    Source at <a href="https://github.com/ashutosh887/ClickLiv">github.com/ashutosh887/ClickLiv</a>.
+  </footer>
+</div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => Number(n).toLocaleString('en-US');
+
+async function loadDimensions() {
+  const res = await fetch('/api/dimensions');
+  if (!res.ok) return;
+  const data = await res.json();
+  for (const row of data.platforms || []) {
+    $('platform').insertAdjacentHTML('beforeend',
+      `<option value="${row.name}">${row.name} (${fmt(row.peak)})</option>`);
+  }
+  for (const row of data.video_types || []) {
+    $('videoType').insertAdjacentHTML('beforeend',
+      `<option value="${row.name}">${row.name} (${fmt(row.peak)})</option>`);
+  }
+}
+
+function draw(rows) {
+  const svg = $('chart');
+  svg.innerHTML = '';
+  if (!rows.length) { $('status').textContent = 'No data for that slice.'; return; }
+
+  const W = 940, H = 340, L = 56, R = 14, T = 16, B = 34;
+  const iw = W - L - R, ih = H - T - B;
+  const top = Math.max(...rows.map((r) => r.peak_concurrency)) || 1;
+  const x = (i) => L + (rows.length === 1 ? iw / 2 : (i / (rows.length - 1)) * iw);
+  const y = (v) => T + ih - (v / top) * ih;
+
+  const parts = [];
+  for (let t = 0; t <= 4; t++) {
+    const v = Math.round((top / 4) * t), py = y(v);
+    parts.push(`<line class="gridline" x1="${L}" y1="${py}" x2="${W - R}" y2="${py}"/>`);
+    parts.push(`<text class="axis" x="${L - 8}" y="${py + 4}" text-anchor="end">${fmt(v)}</text>`);
+  }
+  const line = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(r.peak_concurrency).toFixed(1)}`).join('');
+  parts.push(`<path class="area" d="${line}L${x(rows.length - 1).toFixed(1)},${y(0)}L${x(0).toFixed(1)},${y(0)}Z"/>`);
+  parts.push(`<path class="line" d="${line}"/>`);
+
+  const step = Math.max(1, Math.ceil(rows.length / 7));
+  rows.forEach((r, i) => {
+    if (i % step && i !== rows.length - 1) return;
+    parts.push(`<text class="axis" x="${x(i).toFixed(1)}" y="${H - 12}" text-anchor="middle">${String(r.bucket_start).slice(5, 16)}</text>`);
+  });
+  svg.innerHTML = parts.join('');
+}
+
+async function load() {
+  $('status').textContent = 'Loading…';
+  const params = new URLSearchParams({
+    grain: $('grain').value,
+    platform: $('platform').value,
+    video_type: $('videoType').value,
+  });
+  try {
+    const res = await fetch(`/api/concurrency?${params}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    $('peak').textContent = fmt(data.peak);
+    draw(data.rows);
+    const read = data.statistics?.rows_read;
+    $('status').textContent =
+      `${fmt(data.rows.length)} buckets at ${data.grain} grain`
+      + (read ? `, ${fmt(read)} rows read server side` : '');
+  } catch (error) {
+    $('status').textContent = `Could not load: ${error.message}`;
+  }
+}
+
+for (const id of ['platform', 'videoType', 'grain']) $(id).addEventListener('change', load);
+await loadDimensions();
+await load();
+</script>
+</body>
+</html>
