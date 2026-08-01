@@ -216,6 +216,14 @@ plan, which is the point, not a coincidence to explain away. `system.query_log.p
 records `['clickliv.minute_occupancy.proj_content_minute']` for the query, so the claim
 is checkable after the fact and not just at EXPLAIN time.
 
+## The dashboard
+
+`make ui` serves a minimal concurrency dashboard at `localhost:8765`: one line chart of
+peak and average concurrency per hour, one platform filter, nothing more. No new
+dependency: it is a standard-library `http.server` reusing the same zero-dependency
+`ClickHouse` client as the rest of the project, reading `marts.v_concurrency` directly.
+The platform list in the filter is queried live from `minute_occupancy`, not hand-typed.
+
 ## Gate C, the held-out dry run
 
 The tuning CSV spans 11.8 days, but the real submission is one fresh day (O8). `make
@@ -370,6 +378,7 @@ src/clickliv/answers.py      benchmark answers, latencies and evidence, no hand-
 sql/07_projections.sql       proj_content_minute, reordered by (content_id, minute)
 src/clickliv/projections.py  before/after/forced EXPLAIN, query_log confirmation
 src/clickliv/gate_c.py       Gate C, the held-out single-day dry run
+src/clickliv/ui.py           the minimal concurrency dashboard
 src/clickliv/cli.py          command dispatch, identical for local and Cloud
 src/clickliv/ch.py           zero-dependency ClickHouse HTTP client
 src/clickliv/load.py         CSV ingestion, content before events

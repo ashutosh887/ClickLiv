@@ -2,7 +2,7 @@ CLI := uv run --quiet python -m clickliv
 
 .PHONY: up down logs obs obs-up obs-down obs-logs ping schema load reconcile \
         sessionize occupancy deltas reference verify pipeline all gate-b gate-c \
-        sweep chdb marts answers projections reset
+        sweep chdb marts answers projections ui reset
 
 up:
 	docker compose up -d --wait
@@ -78,6 +78,9 @@ answers:
 
 projections:
 	$(CLI) projections
+
+ui:
+	$(CLI) ui
 
 reset:
 	$(CLI) reset

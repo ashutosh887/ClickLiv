@@ -182,6 +182,12 @@ def step_projections(ch: ClickHouse) -> int:
     return 0 if projections.run(ch, Path("evidence")) else 1
 
 
+def step_ui(ch: ClickHouse) -> int:
+    from . import ui
+    ui.run(ch)
+    return 0
+
+
 def step_obs(ch: ClickHouse) -> int:
     from . import observe
     return observe.report()
@@ -219,6 +225,7 @@ STEPS = {
     "marts": step_marts,
     "answers": step_answers,
     "projections": step_projections,
+    "ui": step_ui,
     "obs": step_obs,
     "reset": step_reset,
 }
