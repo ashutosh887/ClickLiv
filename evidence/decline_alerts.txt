@@ -1,8 +1,8 @@
 -- optional problem-statement use case: alert on concurrency decline
 -- rule: minute-over-minute drop >= 50%, base concurrency >= 50
 -- deterministic threshold on marts.v_occupancy_minute, not an LLM call
--- (see module docstring for why); query_id a546f65b-dec3-4bdc-9c20-d41db92b6f20
+-- (see module docstring for why); query_id a124e4f0-adf0-494f-995d-52cde4996917
 
 minute 29751090: 214 -> 7 sessions (96.7% drop). possible causes per the problem statement: asset ended, system issue, or content not engaging; the alert flags the minute, a human or a downstream LLM call decides which.
 
-narration (openai.gpt-oss-120b via Bedrock, one call, optional, off by default): The massive, near‑total drop (214 → 7, a 96.7 % fall) in a single minute is characteristic of the stream finishing—i.e., the asset ended—because an abrupt, almost complete loss of viewers usually occurs when the broadcast stops, whereas system glitches or gradually disengaging content tend to produce either broader or more incremental declines.
+narration (openai.gpt-oss-120b via Bedrock, one call, optional, off by default): **Most likely cause: Asset ended.** The near‑total (≈97 %) plunge from 214 to just 7 viewers in a single minute suggests the broadcast itself stopped rather than a gradual loss of interest or a transient technical glitch.
