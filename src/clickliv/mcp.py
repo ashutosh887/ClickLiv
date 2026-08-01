@@ -25,6 +25,9 @@ MINUTE_MAX = 4294967295
 ROW_CAP = 40
 
 GRAINS = {"minute": 1, "hour": 60, "day": 1440}
+DEFAULT_GRAIN = "minute"
+
+NO_FILTER = frozenset({"", "all", "any", "none", "null", "*", "%"})
 
 DIMENSIONS = {
     "platform": ("ANDROID_PHONE", "ANDROID_TAB", "FIRE_TV", "IPHONE", "JIO_ANDROID_TV",
@@ -47,14 +50,8 @@ PEAK_SQL = (
 
 SERIES_SQL = f"SELECT minute, concurrency FROM marts.v_occupancy_minute({FILTER_ARGS})"
 
-RANGE_SQL = ("SELECT min(minute), max(minute), count() "
-             f"FROM marts.v_occupancy_minute({FILTER_ARGS})")
-
-
-def unfiltered_settings() -> dict:
-    return {"param_country": "", "param_platform": "", "param_video_type": "",
-            "param_content_id": 0, "param_minute_from": MINUTE_MIN,
-            "param_minute_to": MINUTE_MAX}
+WINDOW_SQL = ("SELECT min_minute, max_minute, minutes_with_sessions, span_days "
+              "FROM marts.v_data_window")
 
 
 class ToolError(ValueError):
@@ -82,12 +79,16 @@ def reject_unknown(arguments: dict, allowed: tuple[str, ...]) -> None:
 
 
 def enum_argument(arguments: dict, name: str) -> str:
-    """Filters come from a vetted allowlist, so a hallucinated value is rejected, not queried."""
+    """Filters come from a vetted allowlist, so a hallucinated value is rejected, not queried.
+    The sentinels a model reaches for when it means no filter collapse to no filter."""
     value = arguments.get(name)
-    if value in (None, ""):
+    if value is None:
+        return ""
+    if isinstance(value, str) and value.strip().lower() in NO_FILTER:
         return ""
     if not isinstance(value, str) or value not in DIMENSIONS[name]:
-        raise ToolError(f"{name} must be one of {', '.join(DIMENSIONS[name])}, got {value!r}")
+        raise ToolError(f"{name} must be one of {', '.join(DIMENSIONS[name])}, or left out "
+                        f"for no filter, got {value!r}")
     return value
 
 
@@ -185,9 +186,9 @@ def downsample(rows: list[tuple], cap: int) -> tuple[list[tuple], int]:
 
 def tool_concurrency_peak(agent: ClickHouse, arguments: dict):
     """Peak and average concurrency per bucket from marts.v_concurrency.
-    Every argument reaches SQL as a bound query parameter, never as text."""
+    No arguments means the whole dataset at minute grain, which is the busiest moment."""
     reject_unknown(arguments, ("grain", "platform", "country", "video_type", "content_id"))
-    grain = arguments.get("grain")
+    grain = arguments.get("grain") or DEFAULT_GRAIN
     if grain not in GRAINS:
         raise ToolError(f"grain must be one of {', '.join(GRAINS)}, got {grain!r}")
     settings = {**filter_settings(arguments), "param_grain_minutes": GRAINS[grain],
@@ -203,8 +204,10 @@ def tool_concurrency_peak(agent: ClickHouse, arguments: dict):
     else:
         summary = ["no minutes matched, so there is no peak to report"]
     summary.append(f"filters: {filter_label(arguments)}")
+    if len(result.rows) > 1:
+        summary.append("buckets are listed busiest first, not in time order")
     rows = [(row[0], stamp(row[0]), row[1], round(float(row[2]), 1), row[3])
-            for row in result.rows]
+            for row in sorted(result.rows, key=lambda row: (-int(row[1]), int(row[0])))]
     columns = ["bucket_minute", "bucket_start", "peak", "average", "minutes_in_bucket"]
     return answer(summary, columns, rows, result), result
 
@@ -263,14 +266,14 @@ def tool_list_dimensions(agent: ClickHouse, arguments: dict):
     pairs = [(dimension, value) for dimension, values in DIMENSIONS.items() for value in values]
     sql, settings = slice_query(pairs)
     result = agent.query(sql, settings=settings)
-    bounds = agent.query(RANGE_SQL, settings=unfiltered_settings())
-    low, high, minutes = bounds.rows[0]
+    low, high, minutes, days = agent.query(WINDOW_SQL).rows[0]
     summary = [
         "these are the only filter values this server accepts; anything else is rejected "
-        "before it reaches SQL",
-        f"minute range {low} to {high} ({stamp(low)} to {stamp(high)}), {int(minutes):,} "
-        "minutes with sessions",
-        f"grain values for concurrency_peak: {', '.join(GRAINS)}",
+        "before it reaches SQL, and leaving a filter out means no filter on that dimension",
+        f"the dataset is a fixed historical extract covering {stamp(low)} to {stamp(high)}, "
+        f"{float(days):.1f} days, so do not assume the present is inside it",
+        f"epoch minutes {low} to {high}, {int(minutes):,} minutes carry sessions",
+        f"grain values for concurrency_peak: {', '.join(GRAINS)}, default {DEFAULT_GRAIN}",
     ]
     rows = [(row[0], row[1], row[2], row[4]) for row in
             sorted(result.rows, key=lambda row: (row[0], -int(row[2])))]
@@ -281,48 +284,70 @@ def tool_list_dimensions(agent: ClickHouse, arguments: dict):
 TOOLS = [
     {
         "name": "concurrency_peak",
-        "description": "Peak and average foreground concurrency per bucket at minute, hour "
-                       "or day grain, optionally filtered. Reads marts.v_concurrency.",
+        "description": "Answers when foreground concurrency was highest and how high it got. "
+                       "Call it with no arguments at all for the busiest moment in the whole "
+                       "dataset, which is what a question like what was the busiest time is "
+                       "asking for: grain defaults to minute and the window defaults to every "
+                       "minute the dataset holds, so no time range is ever needed. Add a "
+                       "filter only to narrow the question, and leave a filter out to mean no "
+                       "filter on that dimension. Reads marts.v_concurrency.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "grain": {"type": "string", "enum": list(GRAINS),
-                          "description": "Bucket size for the peak."},
+                          "description": "Bucket size for the peak. Defaults to minute, which "
+                                         "is the right grain for the busiest moment. Use hour "
+                                         "or day only when the question asks for the busiest "
+                                         "hour or the busiest day."},
                 "platform": {"type": "string", "enum": list(DIMENSIONS["platform"]),
-                             "description": "Optional platform filter."},
+                             "description": "Optional platform filter, case sensitive. Leave "
+                                            "it out for every platform."},
                 "country": {"type": "string", "enum": list(DIMENSIONS["country"]),
-                            "description": "Optional country filter."},
+                            "description": "Optional country filter, case sensitive. Leave it "
+                                           "out for every country."},
                 "video_type": {"type": "string", "enum": list(DIMENSIONS["video_type"]),
-                               "description": "Optional video type filter."},
+                               "description": "Optional video type filter, case sensitive. "
+                                              "Leave it out for both live and vod."},
                 "content_id": {"type": "integer", "minimum": 0,
-                               "description": "Optional content id filter."},
+                               "description": "Optional content id filter. Leave it out, or "
+                                              "pass 0, for every title."},
             },
-            "required": ["grain"],
             "additionalProperties": False,
         },
         "run": tool_concurrency_peak,
     },
     {
         "name": "concurrency_series",
-        "description": "The per minute concurrency series, optionally filtered and bounded by "
-                       "epoch minute, downsampled to stay readable. Reads "
-                       "marts.v_occupancy_minute.",
+        "description": "The concurrency curve minute by minute, for plotting a shape or "
+                       "reading a specific stretch of time. With no arguments it returns the "
+                       "whole dataset, downsampled so each point keeps the peak of its window. "
+                       "minute_from and minute_to are epoch minutes, not dates, and both "
+                       "default to the full window; call list_dimensions for the range the "
+                       "dataset covers. For a single peak number prefer concurrency_peak. "
+                       "Reads marts.v_occupancy_minute.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "platform": {"type": "string", "enum": list(DIMENSIONS["platform"]),
-                             "description": "Optional platform filter."},
+                             "description": "Optional platform filter, case sensitive. Leave "
+                                            "it out for every platform."},
                 "country": {"type": "string", "enum": list(DIMENSIONS["country"]),
-                            "description": "Optional country filter."},
+                            "description": "Optional country filter, case sensitive. Leave it "
+                                           "out for every country."},
                 "video_type": {"type": "string", "enum": list(DIMENSIONS["video_type"]),
-                               "description": "Optional video type filter."},
+                               "description": "Optional video type filter, case sensitive. "
+                                              "Leave it out for both live and vod."},
                 "content_id": {"type": "integer", "minimum": 0,
-                               "description": "Optional content id filter."},
+                               "description": "Optional content id filter. Leave it out, or "
+                                              "pass 0, for every title."},
                 "minute_from": {"type": "integer", "minimum": MINUTE_MIN, "maximum": MINUTE_MAX,
-                                "description": "Inclusive start, in minutes since the epoch. "
+                                "description": "Inclusive start, in minutes since the unix "
+                                               "epoch, so a unix timestamp divided by 60. "
+                                               "Defaults to the first minute in the dataset. "
                                                "Call list_dimensions for the valid range."},
                 "minute_to": {"type": "integer", "minimum": MINUTE_MIN, "maximum": MINUTE_MAX,
-                              "description": "Inclusive end, in minutes since the epoch."},
+                              "description": "Inclusive end, in minutes since the unix epoch. "
+                                             "Defaults to the last minute in the dataset."},
             },
             "additionalProperties": False,
         },
@@ -331,7 +356,10 @@ TOOLS = [
     {
         "name": "top_slices",
         "description": "Every value of one dimension ranked by its own peak concurrency, with "
-                       "the minute it peaked, so crossovers between slices are visible.",
+                       "the minute it peaked, so crossovers between slices are visible. Use it "
+                       "for the busiest platform, country or video type. Each value is summed "
+                       "across the other dimensions before its maximum is taken, so the "
+                       "figures are comparable and do not add up to the overall peak.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -345,8 +373,11 @@ TOOLS = [
     },
     {
         "name": "list_dimensions",
-        "description": "The accepted platform, country and video type values and the available "
-                       "minute range. Call this before filtering.",
+        "description": "The accepted platform, country and video type values, and the time "
+                       "window the dataset actually covers as both epoch minutes and UTC "
+                       "timestamps. The data is a fixed historical extract, not a live feed, "
+                       "so call this before filtering or before naming any date, and never "
+                       "assume the present is inside the window.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
         "run": tool_list_dimensions,
     },
@@ -412,8 +443,8 @@ def dispatch(agent: ClickHouse, message: dict) -> dict | None:
 
 def health(agent: ClickHouse) -> dict:
     try:
-        result = agent.query(RANGE_SQL, settings=unfiltered_settings())
-        low, high, minutes = result.rows[0]
+        result = agent.query(WINDOW_SQL)
+        low, high, minutes, _ = result.rows[0]
         return {"ok": True, "user": AGENT_USER, "host": agent.config.host,
                 "minute_from": int(low), "minute_to": int(high), "minutes": int(minutes),
                 "tools": [tool["name"] for tool in TOOLS]}

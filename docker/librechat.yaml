@@ -18,17 +18,36 @@ mcpServers:
     type: streamable-http
     url: http://host.docker.internal:8765/mcp
     title: 'ClickLiv marts guardrailed'
-    description: 'Pre vetted parameterized queries over the ClickLiv marts views. The model cannot emit SQL here.'
+    description: 'The default surface. Pre vetted parameterized queries over the ClickLiv marts views, with the dataset time window and the valid filter values built in. Try these tools before writing any SQL.'
     timeout: 60000
     initTimeout: 15000
     startup: true
     chatMenu: true
     serverInstructions: |
-      This is the default surface for every question about foreground concurrency,
-      peaks, time series and top slices. Reach for concurrency_peak,
-      concurrency_series, top_slices and list_dimensions before anything else.
-      These tools run pre vetted parameterized queries against the ClickLiv marts
-      views, so the numbers are the same ones the pipeline publishes.
+      This is the default surface for every question about foreground concurrency:
+      peaks, busiest moments, time series and top slices. Reach for
+      concurrency_peak, concurrency_series, top_slices and list_dimensions before
+      anything else, and before ever writing SQL on another surface. These tools
+      run pre vetted parameterized queries against the ClickLiv marts views, so the
+      numbers are the same ones the pipeline publishes.
+
+      "What was the busiest time", "when did it peak", "the most busiest time" and
+      anything else asking when concurrency was highest all mean the same thing:
+      the highest per minute foreground concurrency across the whole dataset. Call
+      concurrency_peak with no arguments at all. It already defaults to minute
+      grain over every minute the dataset holds, so never invent a time range and
+      never restrict it to the last day, week or month.
+
+      The data is a fixed historical extract, not a live feed, so the present is
+      outside it. Before you answer any question that names a date, a filter value
+      or a time range, call list_dimensions first. It returns both the valid
+      country, platform and video type values and the exact window the data covers,
+      as epoch minutes and as UTC timestamps. Never ask the user which filter
+      values exist; that is what list_dimensions is for.
+
+      Leave a filter argument out to mean no filter on that dimension. There is no
+      "ALL" value to pass.
+
       Always tell the user that the answer came from the guardrailed ClickLiv
       marts surface, and name the tool you called.
 
@@ -36,16 +55,41 @@ mcpServers:
     type: streamable-http
     url: http://clickhouse-mcp:8000/mcp
     title: 'ClickHouse official read only'
-    description: 'The official ClickHouse MCP server pointed at the ClickLiv Cloud service with write and drop access switched off.'
+    description: 'The labelled escape hatch, not the default. The official ClickHouse MCP server pointed at the ClickLiv Cloud service with write and drop access switched off. Use the clickliv-marts tools first.'
     timeout: 60000
     initTimeout: 15000
     startup: true
     chatMenu: true
     serverInstructions: |
-      This is the escape hatch, not the default. Use it only when the guardrailed
-      ClickLiv marts tools cannot express the question, for example schema
-      exploration or an ad hoc aggregate that has no mart behind it. The
+      This is the escape hatch, not the default. Prefer the clickliv-marts tools,
+      concurrency_peak, concurrency_series, top_slices and list_dimensions, for
+      every question about concurrency, peaks, busiest moments and top slices. Use
+      this surface only when those tools cannot express the question, for example
+      schema exploration or an ad hoc aggregate that has no mart behind it. The
       connection is read only: writes and drops are refused by the server.
+
+      If you do write SQL here, these are the conventions of the marts views, and
+      guessing instead of following them returns zero rows rather than an error:
+
+      The dataset is a fixed historical extract covering 2026-07-14 15:43 UTC to
+      2026-07-26 11:30 UTC. The present is outside it, so a range built from now()
+      that is shorter than a couple of months matches nothing. Read the real bounds
+      from "SELECT * FROM marts.v_data_window" and feed min_minute and max_minute
+      straight into minute_from and minute_to.
+
+      Times are stored as minutes since the unix epoch, so a unix timestamp divided
+      by 60, not as dates.
+
+      marts.v_occupancy_minute and marts.v_concurrency are parameterized views and
+      every parameter is required. For no filter on a string dimension pass an
+      empty string. ALL, ANY, NONE, NULL, * and % are also accepted in any case and
+      mean the same thing. For no filter on content_id pass 0. Real values are case
+      sensitive and the only ones that exist are listed by
+      "SELECT * FROM marts.v_dimension_values"; country is only ever india.
+
+      For the busiest moment overall: grain_minutes = 1, no filters, the full
+      window from marts.v_data_window, then ORDER BY peak_concurrency DESC LIMIT 1.
+
       Whenever you answer from here, say so plainly and show the SQL you ran, so
       the reader can tell an ad hoc query apart from a published mart.
 
