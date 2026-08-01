@@ -291,6 +291,15 @@ rows-read figure comes out of the response's own statistics block; verified byte
 identical to `system.query_log.read_rows` for the same `query_id`, 96,818 rows both
 ways on the unfiltered day-grain call.
 
+Proven end to end through LibreChat itself, not just against the server directly: asked
+"what is the peak foreground-only concurrency, and what was it for platform
+ANDROID_PHONE", `gpt-5.2` called `concurrency_peak` on the `clickliv-marts` surface
+twice and answered 2,692 and 1,704, both exact. `system.query_log` shows the matching
+two queries from `marts_agent` against `marts.v_concurrency` in the same window. Full
+transcript and the cross-check in `evidence/conversational_layer.txt`. In the UI, the
+MCP tool picker must have `clickliv-marts` turned on per conversation; it is off by
+default until chosen.
+
 **LibreChat v0.8.7 talks to two MCP surfaces, and says which one it used.**
 `make chat-up` brings it up at `localhost:3080` from `docker compose --profile chat`,
 with OpenAI `gpt-5.2` as the model provider and MongoDB for its own state. Meilisearch
