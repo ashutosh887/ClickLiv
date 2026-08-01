@@ -9,4 +9,4 @@ ALTER TABLE minute_occupancy ADD PROJECTION IF NOT EXISTS proj_content_minute
     SELECT * ORDER BY (content_id, minute)
 );
 
-ALTER TABLE minute_occupancy MATERIALIZE PROJECTION proj_content_minute;
+ALTER TABLE minute_occupancy MATERIALIZE PROJECTION proj_content_minute SETTINGS mutations_sync = 2;
