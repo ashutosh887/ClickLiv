@@ -32,6 +32,8 @@ services:
       - "4317:4317"
       - "4318:4318"
       - "8124:8123"
+    environment:
+      FRONTEND_URL: ${CLICKSTACK_PUBLIC_URL:-http://localhost:8080}
     volumes:
       - ./docker/clickstack-user.xml:/etc/clickhouse-server/users.d/clickliv.xml:ro
       - hdx-db:/data/db
