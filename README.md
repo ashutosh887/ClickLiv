@@ -166,6 +166,35 @@ own ceiling; every attempt to touch `max_execution_time`, `max_rows_to_read`, or
 `readonly` itself is rejected before the query runs, not after. A raw scan is not
 merely slow, it does not start.
 
+## Answers and evidence
+
+No pipeline evidence, no credit. `make answers` runs a benchmark set of peak and
+average concurrency at minute, hour and day grain, unfiltered and across the same
+dimension slices Gate A checks, entirely through `marts.v_concurrency`, and writes:
+
+```
+answers/benchmark_answers.csv   query_label, params, peak and average concurrency,
+                                 the stated average denominator, byte-identical
+                                 across runs because it carries no query_id or
+                                 timestamp
+answers/latencies.csv           the same queries' query_duration_ms, read_rows,
+                                 read_bytes, result_rows, memory_usage, read from
+                                 system.query_log by query_id, never client wall
+                                 clock (D14)
+evidence/query_log.csv          the same query_log rows again, as the artifact a
+                                 judge can check against a query_id
+evidence/explain_*.txt          EXPLAIN indexes=1 and EXPLAIN ANALYZE for the
+                                 unfiltered day-grain query, showing the granule
+                                 count against minute_occupancy directly
+evidence/oracle_match.csv       occupancy peak, maxIntersections, and the Python
+                                 reference's independent numbers, side by side
+```
+
+Answers and latencies are two files because an answer must be stable across runs and
+a latency should not be forced to pretend it is. Every number is computed by a query
+this repository ran, tagged with a `query_id`, and traceable to `system.query_log`;
+none of it is hand-typed.
+
 ## The active rule
 
 A session is active at time `t` when it is playing **and** foregrounded **and**
@@ -275,6 +304,7 @@ sql/03_occupancy.sql         session_minutes and the minute_occupancy rollup
 sql/04_deltas.sql            merged minute runs to signed deltas
 sql/05_oracles.sql           tables the Python reference is loaded into
 sql/06_marts.sql             parameterized views, RBAC, the query budget
+src/clickliv/answers.py      benchmark answers, latencies and evidence, no hand-typing
 src/clickliv/cli.py          command dispatch, identical for local and Cloud
 src/clickliv/ch.py           zero-dependency ClickHouse HTTP client
 src/clickliv/load.py         CSV ingestion, content before events
