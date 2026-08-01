@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -75,6 +76,7 @@ class ClickHouse:
     def __init__(self, config: Config | None = None, timeout: int = 900):
         self.config = config or Config.from_env()
         self.timeout = timeout
+        self.observer = None
 
     def _post(self, sql: str, body=None, length: int | None = None,
               query_id: str | None = None, settings: dict | None = None,
@@ -92,13 +94,19 @@ class ClickHouse:
         req.add_header("X-ClickHouse-Key", self.config.password)
         if length is not None:
             req.add_header("Content-Length", str(length))
+        start = time.time_ns()
+        error = None
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 return resp.read(), qid
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace").strip()
+            error = f"{e.code} {redact(detail)}"
             raise ClickHouseError(
                 f"{e.code} on query {qid}\n{redact(detail)}\n---\n{redact(sql)[:2000]}") from None
+        finally:
+            if self.observer:
+                self.observer(sql, qid, start, time.time_ns(), error)
 
     def command(self, sql: str, settings: dict | None = None,
                 database: str | None = None, query_id: str | None = None) -> str:

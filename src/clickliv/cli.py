@@ -7,6 +7,7 @@ import re
 import sys
 from pathlib import Path
 
+from . import otel
 from .ch import ClickHouse
 
 SQL_DIR = Path(__file__).resolve().parents[2] / "sql"
@@ -115,16 +116,21 @@ def step_ping(ch: ClickHouse) -> int:
     return 0
 
 
+def run_step(ch: ClickHouse, name: str) -> int:
+    with otel.span(f"stage.{name}"):
+        return STEPS[name](ch)
+
+
 def step_pipeline(ch: ClickHouse) -> int:
     for name in PIPELINE:
-        status = STEPS[name](ch)
+        status = run_step(ch, name)
         if status:
             return status
     return 0
 
 
 def step_all(ch: ClickHouse) -> int:
-    return step_pipeline(ch) or step_reference(ch) or step_verify(ch)
+    return step_pipeline(ch) or run_step(ch, "reference") or run_step(ch, "verify")
 
 
 def step_gate_b(ch: ClickHouse) -> int:
@@ -145,6 +151,11 @@ def step_sweep(ch: ClickHouse) -> int:
 def step_chdb(ch: ClickHouse) -> int:
     from . import chdb_engine
     return 0 if chdb_engine.run(ch, render, SQL_DIR, artifacts_dir()) else 1
+
+
+def step_obs(ch: ClickHouse) -> int:
+    from . import observe
+    return observe.report()
 
 
 def step_reset(ch: ClickHouse) -> int:
@@ -171,6 +182,7 @@ STEPS = {
     "gate-b": step_gate_b,
     "sweep": step_sweep,
     "chdb": step_chdb,
+    "obs": step_obs,
     "reset": step_reset,
 }
 
@@ -193,7 +205,15 @@ def main(argv: list[str]) -> int:
     if command not in STEPS:
         print(f"unknown command: {command}")
         return 2
-    return STEPS[command](ch)
+
+    otel.TRACER = otel.Tracer(os.environ.get("CLICKSTACK_OTLP"),
+                              os.environ.get("CLICKSTACK_KEY"))
+    otel.TRACER.attach(ch)
+    try:
+        with otel.span(f"clickliv.{command}"):
+            return STEPS[command](ch)
+    finally:
+        otel.TRACER.export(ch)
 
 
 if __name__ == "__main__":

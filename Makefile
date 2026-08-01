@@ -1,7 +1,8 @@
 CLI := uv run --quiet python -m clickliv
 
-.PHONY: up down logs ping schema load reconcile sessionize occupancy deltas \
-        reference verify pipeline all gate-b sweep chdb reset
+.PHONY: up down logs obs obs-up obs-down obs-logs ping schema load reconcile \
+        sessionize occupancy deltas reference verify pipeline all gate-b \
+        sweep chdb reset
 
 up:
 	docker compose up -d --wait
@@ -11,6 +12,18 @@ down:
 
 logs:
 	docker compose logs -f clickhouse
+
+obs-up:
+	docker compose --profile obs up -d clickstack
+
+obs-down:
+	docker compose --profile obs stop clickstack
+
+obs-logs:
+	docker compose --profile obs logs -f clickstack
+
+obs:
+	$(CLI) obs
 
 ping:
 	$(CLI) ping

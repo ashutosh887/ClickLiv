@@ -6,6 +6,7 @@ import os
 import time
 from pathlib import Path
 
+from . import otel
 from .ch import ClickHouse, ClickHouseError
 
 CONTENT_STRUCTURE = "content_id Int64, title String, video_type String, category String"
@@ -74,6 +75,23 @@ def raw_csv() -> Path:
     return Path(os.environ.get("RAW_CSV", "data/ch-hackathon-raw-data.csv"))
 
 
+def ingest(ch: ClickHouse, table: str, statement: str, path: Path) -> int:
+    """One traced insert. Visible lag is the delay from acknowledgement to the rows being queryable."""
+    with otel.span(f"ingest.{table}", **{"ingest.source": path.name,
+                                         "ingest.bytes": path.stat().st_size}) as span:
+        started = time.time()
+        ch.insert_csv(statement, path, settings=INSERT_SETTINGS)
+        acknowledged = time.time()
+        rows = int(ch.scalar(f"SELECT count() FROM {table}"))
+        otel.note(span, **{
+            "ingest.rows": rows,
+            "ingest.duration_ms": round((acknowledged - started) * 1000, 1),
+            "ingest.visible_lag_ms": round((time.time() - acknowledged) * 1000, 1),
+        })
+    print(f"{table:<14}{rows:>9,} rows  {acknowledged - started:5.1f}s")
+    return rows
+
+
 def load(ch: ClickHouse) -> None:
     for path in (content_csv(), raw_csv()):
         if not path.exists():
@@ -82,10 +100,7 @@ def load(ch: ClickHouse) -> None:
     ch.command("TRUNCATE TABLE content_meta")
     ch.command("TRUNCATE TABLE raw_events")
 
-    t0 = time.time()
-    ch.insert_csv(CONTENT_INSERT, content_csv(), settings=INSERT_SETTINGS)
-    n_content = int(ch.scalar("SELECT count() FROM content_meta"))
-    print(f"content_meta  {n_content:>9,} rows  {time.time() - t0:5.1f}s")
+    n_content = ingest(ch, "content_meta", CONTENT_INSERT, content_csv())
 
     with content_csv().open("rb") as fh:
         source_rows = sum(1 for _ in fh) - 1
@@ -98,11 +113,7 @@ def load(ch: ClickHouse) -> None:
             "dictionary and silently produce unlabelled rows. See D12."
         )
     ch.command("SYSTEM RELOAD DICTIONARY content_dict")
-
-    t1 = time.time()
-    ch.insert_csv(RAW_INSERT, raw_csv(), settings=INSERT_SETTINGS)
-    n_raw = int(ch.scalar("SELECT count() FROM raw_events"))
-    print(f"raw_events    {n_raw:>9,} rows  {time.time() - t1:5.1f}s")
+    ingest(ch, "raw_events", RAW_INSERT, raw_csv())
 
 
 def reconcile(ch: ClickHouse) -> bool:
