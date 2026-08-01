@@ -66,6 +66,8 @@ EXPECTED = {
     "join_orphans": 0,
 }
 
+INVARIANTS = ("join_orphans",)
+
 
 def content_csv() -> Path:
     return Path(os.environ.get("CONTENT_CSV", "data/ch-hackathon-content-data.csv"))
@@ -150,10 +152,21 @@ def reconcile(ch: ClickHouse, retries: int = 3, retry_wait: float = 2.0) -> bool
         time.sleep(retry_wait)
 
     ok = True
+    drifted = False
     print(f"\n{'check':<18}{'measured':>12}{'FINDINGS.md':>14}")
     for key, want in EXPECTED.items():
         got = int(actual[key])
-        flag = "" if got == want else "  MISMATCH"
-        ok &= got == want
+        if key in INVARIANTS:
+            ok &= got == want
+            flag = "" if got == want else "  MISMATCH"
+        else:
+            drifted |= got != want
+            flag = "" if got == want else "  differs (expected on a new day)"
         print(f"{key:<18}{got:>12,}{want:>14,}{flag}")
+
+    if int(actual["raw_rows"]) == 0 or int(actual["sessions"]) == 0:
+        print("nothing loaded")
+        ok = False
+    print("input matches the tuning data" if not drifted else
+          "input differs from the tuning data; day-invariant checks still enforced")
     return ok

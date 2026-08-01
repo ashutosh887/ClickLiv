@@ -3,7 +3,8 @@ CLI := uv run --quiet python -m clickliv
 .PHONY: up down logs obs obs-up obs-down obs-logs ping schema load reconcile \
         sessionize occupancy deltas reference verify pipeline all gate-b gate-c \
         sweep chdb marts answers projections scale ui userlevel crossover decline \
-        incremental test reset
+        incremental instantaneous submission replay mcp test reset \
+        llm-up llm-down llm-logs chat-up chat-down chat-logs
 
 up:
 	docker compose up -d --wait
@@ -97,6 +98,36 @@ decline:
 
 incremental:
 	$(CLI) incremental
+
+instantaneous:
+	$(CLI) instantaneous
+
+submission:
+	$(CLI) submission
+
+replay:
+	$(CLI) replay
+
+mcp:
+	$(CLI) mcp
+
+llm-up:
+	docker compose --profile llm up -d
+
+llm-down:
+	docker compose --profile llm stop
+
+llm-logs:
+	docker compose --profile llm logs -f langfuse-web langfuse-worker
+
+chat-up:
+	docker compose --profile chat up -d
+
+chat-down:
+	docker compose --profile chat stop
+
+chat-logs:
+	docker compose --profile chat logs -f librechat
 
 test:
 	uv run --quiet python -m unittest discover -s tests -v

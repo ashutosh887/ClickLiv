@@ -77,6 +77,7 @@ class ClickHouse:
         self.config = config or Config.from_env()
         self.timeout = timeout
         self.observer = None
+        self._query_log_source: str | None = None
 
     def _post(self, sql: str, body=None, length: int | None = None,
               query_id: str | None = None, settings: dict | None = None,
@@ -139,16 +140,34 @@ class ClickHouse:
     def ping(self) -> str:
         return self.scalar("SELECT version()")
 
+    def flush_logs(self) -> None:
+        try:
+            self.command("SYSTEM FLUSH LOGS ON CLUSTER default")
+        except ClickHouseError:
+            self.command("SYSTEM FLUSH LOGS")
+
+    def query_log_source(self) -> str:
+        """A Cloud replica's query_log holds only its own queries, so the read spans
+        every replica; the local single-node target has no cluster to span (D35)."""
+        if self._query_log_source is None:
+            try:
+                self.scalar("SELECT count() FROM clusterAllReplicas(default, system.one)")
+                self._query_log_source = "clusterAllReplicas(default, system.query_log)"
+            except ClickHouseError:
+                self._query_log_source = "system.query_log"
+        return self._query_log_source
+
     def query_log_rows(self, columns: str, query_ids: list[str],
                         retries: int = 5, wait: float = 1.0) -> list[dict]:
-        """Flush and read system.query_log for query_ids, retrying on a multi-replica
-        service where a query and the read can land on different replicas."""
+        """Flush and read system.query_log for query_ids, retrying while the write is
+        still in flight."""
         ids = ",".join(f"'{q}'" for q in query_ids)
+        source = self.query_log_source()
         rows: list[dict] = []
         for attempt in range(retries):
-            self.command("SYSTEM FLUSH LOGS")
+            self.flush_logs()
             rows = self.query(
-                f"SELECT {columns} FROM system.query_log "
+                f"SELECT {columns} FROM {source} "
                 f"WHERE type = 'QueryFinish' AND query_id IN ({ids})").dicts()
             if len(rows) >= len(query_ids) or attempt == retries - 1:
                 return rows

@@ -1,0 +1,22 @@
+-- O3: is concurrency at minute m occupancy (any playback in the minute) or
+-- instantaneous overlap at one point in time? Both, per dimension slice.
+-- occupancy comes from minute_occupancy, the rollup marts.v_concurrency serves.
+-- instantaneous clips every active interval to each minute it covers, joins that
+-- minute's dimensions from session_minutes, applies the filter, merges the pieces
+-- of one session back into continuous presence, then peaks the overlap.
+-- two independent SQL paths must agree: maxIntersections over closed millisecond
+-- intervals (clip_end - 1 as the inclusive end), and a signed event sweep on the
+-- half-open form. instantaneous <= occupancy must hold for every slice.
+
+slice                     occupancy  instantaneous       gap   gap %  result
+no filter                     2,692          2,282       410   15.2%  PASS
+platform ANDROID_PHONE        1,704          1,442       262   15.4%  PASS
+platform SONY_ANDROID_TV        279            246        33   11.8%  PASS
+video_type live                 425            354        71   16.7%  PASS
+audio_language hin            1,614          1,405       209   12.9%  PASS
+IPHONE in india                 329            263        66   20.1%  PASS
+vod on Mweb                      62             51        11   17.7%  PASS
+
+PASS: the clipped and merged unfiltered peak (2,282) equals the raw half open sweep over active_intervals (2,282), which Gate A pins to the independent python reference. Clipping and merging therefore adds dimensions without moving the number.
+
+reading: instantaneous is strictly lower on every slice, so the two readings of O3 are not interchangeable and the choice has to be stated, not assumed. Both are now computable per slice, so whichever reading the private ground truth uses, the number is available.

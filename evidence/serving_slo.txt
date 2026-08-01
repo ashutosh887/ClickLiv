@@ -1,0 +1,20 @@
+-- O6b: serving SLO
+target: p99 <= 100 ms
+This target is ours and self-imposed. No SLA was ever published upstream, so
+rather than leave the serving latency unstated we set a number and measure it.
+
+measured server-side from system.query_log.query_duration_ms, looked up by
+query_id. Not client wall clock: network round trip and Python overhead are
+excluded, so this is what the server itself spent.
+
+samples: 40 of 40 (8 benchmark queries x 5 repetitions)
+min       16.0 ms
+p50       23.0 ms
+p95       28.0 ms
+p99       29.0 ms
+max       29.0 ms
+
+PASS: measured p99 of 29.0 ms is within the 100 ms target
+
+percentiles are nearest-rank over every sample. The per-sample rows are in
+evidence/serving_slo.csv so these numbers can be recomputed, not just believed.

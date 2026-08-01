@@ -126,13 +126,9 @@ class Tracer:
         if not self.by_query:
             return
         ch.observer = None
-        ids = ",".join(f"'{q}'" for q in self.by_query)
         try:
-            ch.command("SYSTEM FLUSH LOGS")
-            rows = ch.query(
-                f"SELECT query_id, {', '.join(SERVER_METRICS)} FROM system.query_log "
-                f"WHERE type != 'QueryStart' AND event_date >= today() - 1 "
-                f"AND query_id IN ({ids})").dicts()
+            rows = ch.query_log_rows(f"query_id, {', '.join(SERVER_METRICS)}",
+                                     list(self.by_query))
         except Exception as exc:
             print(f"clickstack: query_log enrichment skipped, {exc}")
             return

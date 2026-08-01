@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 from . import otel
@@ -24,6 +25,9 @@ DEFAULTS = {
 }
 
 PIPELINE = ("schema", "load", "sessionize", "occupancy", "deltas")
+
+REPLAY = ("reset", "schema", "load", "sessionize", "occupancy", "deltas", "reference",
+          "verify", "marts", "projections", "answers", "instantaneous", "submission")
 
 
 def load_dotenv(path: str = ".env") -> None:
@@ -218,6 +222,36 @@ def step_incremental(ch: ClickHouse) -> int:
     return 0 if incremental.run(ch, Path("evidence")) else 1
 
 
+def step_instantaneous(ch: ClickHouse) -> int:
+    from . import instantaneous
+    Path("evidence").mkdir(exist_ok=True)
+    return 0 if instantaneous.run(ch, Path("evidence")) else 1
+
+
+def step_submission(ch: ClickHouse) -> int:
+    from . import submission
+    return 0 if submission.run(ch, artifacts_dir()) else 1
+
+
+def step_replay(ch: ClickHouse) -> int:
+    """The graded run: one command from a fresh CSV to a submission bundle."""
+    started = time.time()
+    for name in REPLAY:
+        print(f"\n===== {name} =====")
+        status = run_step(ch, name)
+        if status:
+            print(f"\nreplay FAILED at {name}")
+            return status
+    print(f"\nreplay complete in {time.time() - started:.0f}s")
+    return 0
+
+
+def step_mcp(ch: ClickHouse) -> int:
+    from . import mcp
+    mcp.serve(ch, port=int(os.environ.get("MCP_PORT", "8765")))
+    return 0
+
+
 def step_obs(ch: ClickHouse) -> int:
     from . import observe
     return observe.report()
@@ -261,6 +295,10 @@ STEPS = {
     "crossover": step_crossover,
     "decline": step_decline,
     "incremental": step_incremental,
+    "instantaneous": step_instantaneous,
+    "submission": step_submission,
+    "replay": step_replay,
+    "mcp": step_mcp,
     "obs": step_obs,
     "reset": step_reset,
 }
