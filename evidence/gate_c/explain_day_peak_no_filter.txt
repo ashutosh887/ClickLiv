@@ -39,46 +39,46 @@ Sorting (Sorting for ORDER BY)
 
 -- EXPLAIN ANALYZE
 Query summary:
-  Time:        7.01 ms (planning 3.60 ms · execution 3.41 ms)
-  Read:        89.74 thousand rows, 1.71 MB (26.28 million rows/s., 499.41 MB/s.)
+  Time:        6.52 ms (planning 3.10 ms · execution 3.41 ms)
+  Read:        89.74 thousand rows, 1.71 MB (26.28 million rows/s., 499.38 MB/s.)
   Peak memory: 448.66 KiB
 
 Output: minute DIV 1440 * 1440, max(sum(sessions)), avg(sum(sessions)), count()
 
 Expression ((Project names + (Projection + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Project names + (Projection + (Change column names to column identifiers + Project names))))))))
 │  I/O: rows 1 → 1 · 32 B → 32 B
-│    time 958.00 ns (0.0%) · parallelism 0.96/1
+│    time 2.29 us (0.1%) · parallelism 0.98/1
 └──Sorting (Sorting for ORDER BY)
    │  Sort description: minute DIV 1440 * 1440 ASC
    │  I/O: rows 1 → 1 · 32 B → 32 B
-   │    Stage (sorting): time 7.67 us (0.2%) · parallelism 0.96/2
-   │    Stage (merge sorted streams): time 4.50 us (0.1%) · parallelism 1.00/1
+   │    Stage (sorting): time 9.04 us (0.3%) · parallelism 0.97/2
+   │    Stage (merge sorted streams): time 5.83 us (0.2%) · parallelism 0.98/1
    └──Expression ((Before ORDER BY + Projection))
       │  I/O: rows 1 → 1 · 32 B → 32 B
-      │    time 833.00 ns (0.0%) · parallelism 0.95/1
+      │    time 1.29 us (0.0%) · parallelism 0.97/1
       └──Aggregating
          │  Keys: minute DIV 1440 * 1440
          │  Aggregates: max(sum(sessions)), avg(sum(sessions)), count()
          │  Skip merging: 0
          │  I/O: rows 633 → 1 (0.16%) · 10.13 KB → 32 B
-         │    Stage (partial aggregation): time 31.83 us (0.9%) · parallelism 1.00/1
-         │    Stage (final aggregation): time 3.83 us (0.1%) · parallelism 0.99/1
+         │    Stage (partial aggregation): time 20.21 us (0.6%) · parallelism 0.99/1
+         │    Stage (final aggregation): time 3.92 us (0.1%) · parallelism 0.97/1
          └──Expression ((Before GROUP BY + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Project names + (Projection + (Change column names to column identifiers + (Project names + (Before ORDER BY + Projection)))))))))
             │  I/O: rows 633 → 633 · 7.60 KB → 10.13 KB
-            │    time 2.63 us (0.1%) · parallelism 1.00/1
+            │    time 5.50 us (0.2%) · parallelism 0.98/1
             └──Aggregating
                │  Keys: minute
                │  Aggregates: sum(sessions)
                │  Skip merging: 0
                │  I/O: rows 89.74 thousand → 633 (0.71%) · 717.91 KB → 7.60 KB
-               │    Stage (partial aggregation): time 170.42 us (5.0%) · parallelism 1.00/1
-               │    Stage (final aggregation): time 14.67 us (0.4%) · parallelism 0.99/1
+               │    Stage (partial aggregation): time 163.83 us (4.8%) · parallelism 1.00/1
+               │    Stage (final aggregation): time 18.33 us (0.5%) · parallelism 0.99/1
                └──Expression (Before GROUP BY)
                   │  I/O: rows 89.74 thousand → 89.74 thousand · 717.91 KB → 717.91 KB
-                  │    time 500.00 ns (0.0%) · parallelism 0.92/1
+                  │    time 625.00 ns (0.0%) · parallelism 0.87/1
                   └──Expression ((WHERE + Change column names to column identifiers))
                      │  I/O: rows 89.74 thousand → 89.74 thousand · 717.91 KB → 717.91 KB
-                     │    time 1.63 us (0.0%) · parallelism 0.92/1
+                     │    time 1.88 us (0.1%) · parallelism 0.96/1
                      └──ReadFromMergeTree (clickliv.minute_occupancy)
                            Read type: Default
                            Parts: 1 | Granules: 11
