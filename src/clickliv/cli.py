@@ -194,7 +194,7 @@ def step_scale(ch: ClickHouse) -> int:
 
 def step_ui(ch: ClickHouse) -> int:
     from . import ui
-    ui.run(ch)
+    ui.run(ch, port=int(os.environ.get("UI_PORT", "8090")))
     return 0
 
 

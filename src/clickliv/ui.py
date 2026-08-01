@@ -335,7 +335,7 @@ def make_handler(ch: ClickHouse):
     return Handler
 
 
-def run(ch: ClickHouse, port: int = 8765) -> None:
+def run(ch: ClickHouse, port: int = 8090) -> None:
     server = HTTPServer(("0.0.0.0", port), make_handler(ch))
     print(f"clickliv dashboard at http://localhost:{port}")
     server.serve_forever()
