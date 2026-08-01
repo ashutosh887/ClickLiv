@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import uuid
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,13 +30,9 @@ DEFAULT_GRAIN = "minute"
 
 NO_FILTER = frozenset({"", "all", "any", "none", "null", "*", "%"})
 
-DIMENSIONS = {
-    "platform": ("ANDROID_PHONE", "ANDROID_TAB", "FIRE_TV", "IPHONE", "JIO_ANDROID_TV",
-                 "LG_HTML_TV", "Mweb", "SAMSUNG_HTML_TV", "SONY_ANDROID_TV",
-                 "XIAOMI_ANDROID_TV"),
-    "country": ("india",),
-    "video_type": ("live", "vod"),
-}
+DIMENSION_NAMES = ("country", "platform", "video_type")
+DIMENSION_TTL = 300
+NAMED_VALUES = 20
 
 FILTER_ARGS = (
     "country = {country:String}, platform = {platform:String}, "
@@ -53,6 +50,17 @@ SERIES_SQL = f"SELECT minute, concurrency FROM marts.v_occupancy_minute({FILTER_
 WINDOW_SQL = ("SELECT min_minute, max_minute, minutes_with_sessions, span_days "
               "FROM marts.v_data_window")
 
+OVERCOUNT_SQL = ("SELECT foreground_peak, foreground_peak_utc, naive_peak, naive_peak_utc, "
+                 "peak_overcount_pct, foreground_average, naive_average, "
+                 "average_overcount_pct FROM marts.v_overcount")
+
+UNIT_NOTE = ("concurrency counts video sessions that were in the foreground at the same "
+             "moment, not distinct people or accounts")
+
+DIMENSION_SQL = ("SELECT dimension, value FROM marts.v_dimension_values WHERE dimension IN "
+                 f"({', '.join(repr(name) for name in DIMENSION_NAMES)}) AND value != '' "
+                 "ORDER BY dimension, minutes_present DESC, value")
+
 TITLE_SQL = ("SELECT content_id, title, minutes_present FROM marts.v_titles "
              "WHERE title != '' AND positionCaseInsensitive(title, {needle:String}) > 0 "
              "ORDER BY lower(title) = lower({needle:String}) DESC, minutes_present DESC "
@@ -61,6 +69,31 @@ TITLE_SQL = ("SELECT content_id, title, minutes_present FROM marts.v_titles "
 
 class ToolError(ValueError):
     pass
+
+
+CACHE: dict[str, tuple[str, ...]] = {}
+CACHE_READ = 0.0
+CACHE_LOCK = threading.Lock()
+
+
+def dimensions(agent: ClickHouse, refresh: bool = False) -> dict[str, tuple[str, ...]]:
+    """The accepted values come out of the data, so a replacement dataset needs no code change."""
+    global CACHE, CACHE_READ
+    with CACHE_LOCK:
+        if refresh or not CACHE or time.monotonic() - CACHE_READ > DIMENSION_TTL:
+            found: dict[str, list[str]] = {name: [] for name in DIMENSION_NAMES}
+            for name, value in agent.query(DIMENSION_SQL).rows:
+                found.setdefault(str(name), []).append(str(value))
+            CACHE = {name: tuple(values) for name, values in found.items()}
+            CACHE_READ = time.monotonic()
+        return CACHE
+
+
+def named_values(values: tuple[str, ...]) -> str:
+    if len(values) <= NAMED_VALUES:
+        return ", ".join(values)
+    return (f"{', '.join(values[:NAMED_VALUES])} and {len(values) - NAMED_VALUES} more, "
+            "all listed by list_dimensions")
 
 
 def agent_connection(ch: ClickHouse) -> ClickHouse:
@@ -83,21 +116,31 @@ def reject_unknown(arguments: dict, allowed: tuple[str, ...]) -> None:
                         f"{', '.join(allowed) or 'no arguments'}")
 
 
-def enum_argument(arguments: dict, name: str) -> str:
-    """Filters come from a vetted allowlist, so a hallucinated value is rejected, not queried.
-    Matching folds case and the sentinels a model reaches for collapse to no filter."""
+def match_value(known: tuple[str, ...], value: str) -> str | None:
+    """Exact match wins and the case fold is only a fallback, so hin and HIN stay distinct."""
+    trimmed = value.strip()
+    if trimmed in known:
+        return trimmed
+    return next((entry for entry in known if entry.lower() == trimmed.lower()), None)
+
+
+def enum_argument(agent: ClickHouse, arguments: dict, name: str) -> str:
+    """Filters come from the values the data holds, so a hallucinated value is rejected, not
+    queried. The sentinels a model reaches for collapse to no filter."""
     value = arguments.get(name)
     if value is None:
         return ""
     if not isinstance(value, str):
         raise ToolError(f"{name} must be a string, got {value!r}")
-    needle = value.strip().lower()
-    if needle in NO_FILTER:
+    if value.strip().lower() in NO_FILTER:
         return ""
-    canonical = next((known for known in DIMENSIONS[name] if known.lower() == needle), None)
+    canonical = match_value(dimensions(agent).get(name, ()), value)
     if canonical is None:
-        raise ToolError(f"{name} must be one of {', '.join(DIMENSIONS[name])}, or left out "
-                        f"for no filter, got {value!r}")
+        known = dimensions(agent, refresh=True).get(name, ())
+        canonical = match_value(known, value)
+        if canonical is None:
+            raise ToolError(f"{name} must be one of {named_values(known)}, or left out "
+                            f"for no filter, got {value!r}")
     return canonical
 
 
@@ -147,18 +190,19 @@ def content_id_argument(agent: ClickHouse, arguments: dict) -> int:
     return resolve_title(agent, title)
 
 
-def filter_settings(arguments: dict, content_id: int) -> dict:
+def filter_settings(agent: ClickHouse, arguments: dict, content_id: int) -> dict:
     return {
-        "param_country": enum_argument(arguments, "country"),
-        "param_platform": enum_argument(arguments, "platform"),
-        "param_video_type": enum_argument(arguments, "video_type"),
+        "param_country": enum_argument(agent, arguments, "country"),
+        "param_platform": enum_argument(agent, arguments, "platform"),
+        "param_video_type": enum_argument(agent, arguments, "video_type"),
         "param_content_id": content_id,
     }
 
 
-def filter_label(arguments: dict, content_id: int = 0) -> str:
-    parts = [f"{name}={arguments[name]}" for name in ("platform", "country", "video_type")
-             if arguments.get(name) not in (None, "")]
+def filter_label(settings: dict, arguments: dict, content_id: int) -> str:
+    """Reports the canonical values, so a sentinel reads as no filter rather than as a value."""
+    parts = [f"{name}={settings['param_' + name]}"
+             for name in ("platform", "country", "video_type") if settings["param_" + name]]
     if arguments.get("title"):
         parts.append(f"title={arguments['title']} (content_id {content_id})")
     elif content_id:
@@ -172,8 +216,22 @@ def stamp(minute: int | None) -> str:
     return datetime.fromtimestamp(int(minute) * 60, UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def empty_note(agent: ClickHouse, label: str) -> list[str]:
+    """An empty match is never an answer, so say what does exist instead of returning a zero."""
+    low, high, minutes, _ = agent.query(WINDOW_SQL).rows[0]
+    return [
+        f"nothing matched, so there is no number to report and zero is not the answer; "
+        f"the filters asked for were {label}",
+        f"the dataset is a fixed historical extract covering {stamp(low)} to {stamp(high)}, "
+        f"epoch minutes {low} to {high}, {int(minutes):,} of which carry sessions, and "
+        f"nothing outside that window exists",
+        "call list_dimensions for every filter value this surface accepts, and tell the "
+        "user which part of the question the data does not cover",
+    ]
+
+
 def slice_branch(index: int, dimension: str) -> str:
-    filters = {name: "{blank:String}" for name in DIMENSIONS}
+    filters = {name: "{blank:String}" for name in DIMENSION_NAMES}
     filters[dimension] = f"{{value{index}:String}}"
     return (f"SELECT {{dimension{index}:String}} AS dimension, {{value{index}:String}} AS value, "
             "max(concurrency) AS peak_concurrency, argMax(minute, concurrency) AS peak_minute, "
@@ -231,25 +289,29 @@ def tool_concurrency_peak(agent: ClickHouse, arguments: dict):
     """Peak and average concurrency per bucket from marts.v_concurrency.
     No arguments means the whole dataset at minute grain, which is the busiest moment."""
     reject_unknown(arguments, ("grain", "platform", "country", "video_type", "content_id",
-                               "title"))
+                               "title", "minute_from", "minute_to"))
     grain = arguments.get("grain") or DEFAULT_GRAIN
     if grain not in GRAINS:
         raise ToolError(f"grain must be one of {', '.join(GRAINS)}, got {grain!r}")
+    minute_from = integer_argument(arguments, "minute_from", MINUTE_MIN, MINUTE_MIN, MINUTE_MAX)
+    minute_to = integer_argument(arguments, "minute_to", MINUTE_MAX, MINUTE_MIN, MINUTE_MAX)
+    if minute_from > minute_to:
+        raise ToolError(f"minute_from {minute_from} is after minute_to {minute_to}")
     content_id = content_id_argument(agent, arguments)
-    settings = {**filter_settings(arguments, content_id),
+    settings = {**filter_settings(agent, arguments, content_id),
                 "param_grain_minutes": GRAINS[grain],
-                "param_minute_from": MINUTE_MIN, "param_minute_to": MINUTE_MAX}
+                "param_minute_from": minute_from, "param_minute_to": minute_to}
+    label = filter_label(settings, arguments, content_id)
     result = agent.query(PEAK_SQL, settings=settings)
     peak = max((row[1] for row in result.rows), default=0)
     peak_bucket = next((row[0] for row in result.rows if row[1] == peak), None)
     weighted = sum(float(row[2]) * int(row[3]) for row in result.rows)
     minutes = sum(int(row[3]) for row in result.rows)
-    if minutes:
-        summary = [f"peak concurrency {peak} in the {grain} bucket starting {stamp(peak_bucket)}",
-                   f"average concurrency {weighted / minutes:.1f} over {minutes:,} active minutes"]
-    else:
-        summary = ["no minutes matched, so there is no peak to report"]
-    summary.append(f"filters: {filter_label(arguments, content_id)}")
+    if not minutes:
+        return answer(empty_note(agent, label), [], [], result), result
+    summary = [f"peak concurrency {peak} in the {grain} bucket starting {stamp(peak_bucket)}",
+               f"average concurrency {weighted / minutes:.1f} over {minutes:,} active minutes",
+               UNIT_NOTE, f"filters: {label}"]
     if len(result.rows) > 1:
         summary.append("buckets are listed busiest first, not in time order")
     rows = [(row[0], stamp(row[0]), row[1], round(float(row[2]), 1), row[3])
@@ -268,18 +330,18 @@ def tool_concurrency_series(agent: ClickHouse, arguments: dict):
     if minute_from > minute_to:
         raise ToolError(f"minute_from {minute_from} is after minute_to {minute_to}")
     content_id = content_id_argument(agent, arguments)
-    settings = {**filter_settings(arguments, content_id),
+    settings = {**filter_settings(agent, arguments, content_id),
                 "param_minute_from": minute_from, "param_minute_to": minute_to}
+    label = filter_label(settings, arguments, content_id)
     result = agent.query(SERIES_SQL, settings=settings)
-    peak = max((row[1] for row in result.rows), default=0)
-    peak_minute = next((row[0] for row in result.rows if row[1] == peak), None)
+    if not result.rows:
+        return answer(empty_note(agent, label), [], [], result), result
+    peak = max(row[1] for row in result.rows)
+    peak_minute = next(row[0] for row in result.rows if row[1] == peak)
     points, stride = downsample(result.rows, ROW_CAP)
-    if result.rows:
-        summary = [f"{len(result.rows):,} minutes with sessions, peak {peak} at {stamp(peak_minute)}",
-                   f"window: {stamp(result.rows[0][0])} to {stamp(result.rows[-1][0])}"]
-    else:
-        summary = ["no minutes matched in this window"]
-    summary.append(f"filters: {filter_label(arguments, content_id)}")
+    summary = [f"{len(result.rows):,} minutes with sessions, peak {peak} at {stamp(peak_minute)}",
+               f"window: {stamp(result.rows[0][0])} to {stamp(result.rows[-1][0])}",
+               UNIT_NOTE, f"filters: {label}"]
     if stride > 1:
         summary.append(f"downsampled to {len(points)} points, each the peak of a "
                        f"{stride} minute window")
@@ -292,25 +354,51 @@ def tool_top_slices(agent: ClickHouse, arguments: dict):
     The sum across the unfiltered dimensions happens before the maximum, never after."""
     reject_unknown(arguments, ("dimension",))
     dimension = arguments.get("dimension")
-    if dimension not in DIMENSIONS:
-        raise ToolError(f"dimension must be one of {', '.join(DIMENSIONS)}, got {dimension!r}")
-    sql, settings = slice_query([(dimension, value) for value in DIMENSIONS[dimension]])
+    if dimension not in DIMENSION_NAMES:
+        raise ToolError(f"dimension must be one of {', '.join(DIMENSION_NAMES)}, "
+                        f"got {dimension!r}")
+    known = dimensions(agent)[dimension]
+    sql, settings = slice_query([(dimension, value) for value in known])
     result = agent.query(sql, settings=settings)
     present = [row for row in result.rows if int(row[4]) > 0]
     summary = [
         f"{dimension} values ranked by peak concurrency, each summed across the other "
         f"dimensions before the maximum is taken",
-        f"{len(present)} of {len(DIMENSIONS[dimension])} values carry sessions",
+        f"{len(present)} of {len(known)} values carry sessions",
     ]
     rows = [(row[1], row[2], row[3], stamp(row[3]), row[4]) for row in present]
     columns = [dimension, "peak", "peak_minute", "peak_minute_start", "minutes_present"]
     return answer(summary, columns, rows, result), result
 
 
+def tool_overcount(agent: ClickHouse, arguments: dict):
+    """The foreground-only count against the naive any-open-session count, from marts.v_overcount."""
+    reject_unknown(arguments, ())
+    result = agent.query(OVERCOUNT_SQL)
+    (foreground_peak, foreground_utc, naive_peak, naive_utc,
+     peak_pct, foreground_average, naive_average, average_pct) = result.rows[0]
+    summary = [
+        f"counting every open session instead of only foreground sessions overcounts the "
+        f"peak by {float(peak_pct):.1f}% and the average by {float(average_pct):.1f}%",
+        f"foreground peak {int(foreground_peak):,} at {foreground_utc} UTC against naive "
+        f"peak {int(naive_peak):,} at {naive_utc} UTC",
+        f"foreground average {float(foreground_average):.2f} against naive average "
+        f"{float(naive_average):.2f}",
+        "the two peaks land in different minutes, so the naive count is wrong about when "
+        "the busiest moment was as well as how big it was",
+    ]
+    rows = [("peak", int(foreground_peak), int(naive_peak), f"{float(peak_pct):.2f}%"),
+            ("average", round(float(foreground_average), 2), round(float(naive_average), 2),
+             f"{float(average_pct):.2f}%")]
+    columns = ["measure", "foreground_only", "naive_any_open_session", "overcount"]
+    return answer(summary, columns, rows, result), result
+
+
 def tool_list_dimensions(agent: ClickHouse, arguments: dict):
     """The filter values this server accepts, each checked against the data in one query."""
     reject_unknown(arguments, ())
-    pairs = [(dimension, value) for dimension, values in DIMENSIONS.items() for value in values]
+    known = dimensions(agent, refresh=True)
+    pairs = [(dimension, value) for dimension, values in known.items() for value in values]
     sql, settings = slice_query(pairs)
     result = agent.query(sql, settings=settings)
     low, high, minutes, days = agent.query(WINDOW_SQL).rows[0]
@@ -346,13 +434,13 @@ TOOLS = [
                                          "is the right grain for the busiest moment. Use hour "
                                          "or day only when the question asks for the busiest "
                                          "hour or the busiest day."},
-                "platform": {"type": "string", "enum": list(DIMENSIONS["platform"]),
+                "platform": {"type": "string",
                              "description": "Optional platform filter, case sensitive. Leave "
                                             "it out for every platform."},
-                "country": {"type": "string", "enum": list(DIMENSIONS["country"]),
+                "country": {"type": "string",
                             "description": "Optional country filter, case sensitive. Leave it "
                                            "out for every country."},
-                "video_type": {"type": "string", "enum": list(DIMENSIONS["video_type"]),
+                "video_type": {"type": "string",
                                "description": "Optional video type filter, case sensitive. "
                                               "Leave it out for both live and vod."},
                 "content_id": {"type": "integer", "minimum": 0,
@@ -366,6 +454,15 @@ TOOLS = [
                                          "dataset holds no such title the call fails "
                                          "rather than answering for everything, so report "
                                          "that the dataset does not cover it."},
+                "minute_from": {"type": "integer", "minimum": MINUTE_MIN, "maximum": MINUTE_MAX,
+                                "description": "Optional inclusive start, in minutes since the "
+                                               "unix epoch, so a unix timestamp divided by 60. "
+                                               "Leave it out for the whole dataset, which is "
+                                               "what the busiest moment asks for. Call "
+                                               "list_dimensions for the valid range."},
+                "minute_to": {"type": "integer", "minimum": MINUTE_MIN, "maximum": MINUTE_MAX,
+                              "description": "Optional inclusive end, in minutes since the unix "
+                                             "epoch. Leave it out for the whole dataset."},
             },
             "additionalProperties": False,
         },
@@ -383,13 +480,13 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "platform": {"type": "string", "enum": list(DIMENSIONS["platform"]),
+                "platform": {"type": "string",
                              "description": "Optional platform filter, case sensitive. Leave "
                                             "it out for every platform."},
-                "country": {"type": "string", "enum": list(DIMENSIONS["country"]),
+                "country": {"type": "string",
                             "description": "Optional country filter, case sensitive. Leave it "
                                            "out for every country."},
-                "video_type": {"type": "string", "enum": list(DIMENSIONS["video_type"]),
+                "video_type": {"type": "string",
                                "description": "Optional video type filter, case sensitive. "
                                               "Leave it out for both live and vod."},
                 "content_id": {"type": "integer", "minimum": 0,
@@ -424,13 +521,25 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "dimension": {"type": "string", "enum": list(DIMENSIONS),
+                "dimension": {"type": "string", "enum": list(DIMENSION_NAMES),
                               "description": "Dimension whose values are ranked."},
             },
             "required": ["dimension"],
             "additionalProperties": False,
         },
         "run": tool_top_slices,
+    },
+    {
+        "name": "overcount",
+        "description": "How much a naive concurrency count overstates the truth. It compares "
+                       "the foreground only count this project publishes against counting "
+                       "every session that had the app open at all, background included, and "
+                       "returns both peaks, both averages, the percentage gap and the two "
+                       "minutes the peaks land in. This is the tool for any question about "
+                       "overcounting, background sessions, the naive count, or why "
+                       "foreground only matters. Takes no arguments. Reads marts.v_overcount.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "run": tool_overcount,
     },
     {
         "name": "list_dimensions",
@@ -445,9 +554,21 @@ TOOLS = [
 ]
 
 
-def listing() -> list[dict]:
-    return [{key: tool[key] for key in ("name", "description", "inputSchema")}
-            for tool in TOOLS]
+def listing(agent: ClickHouse) -> list[dict]:
+    """The dimension enums are filled from the data at list time, never from a baked in list."""
+    try:
+        known = dimensions(agent)
+    except (ClickHouseError, OSError):
+        known = {}
+    tools = []
+    for tool in TOOLS:
+        schema = json.loads(json.dumps(tool["inputSchema"]))
+        for name, values in known.items():
+            if values and name in schema["properties"]:
+                schema["properties"][name]["enum"] = list(values)
+        tools.append({"name": tool["name"], "description": tool["description"],
+                      "inputSchema": schema})
+    return tools
 
 
 def call_tool(agent: ClickHouse, name: str, arguments: dict) -> dict:
@@ -490,7 +611,7 @@ def dispatch(agent: ClickHouse, message: dict) -> dict | None:
     if isinstance(method, str) and method.startswith("notifications/"):
         return None
     if method == "tools/list":
-        return rpc_result(request_id, {"tools": listing()})
+        return rpc_result(request_id, {"tools": listing(agent)})
     if method == "tools/call":
         try:
             return rpc_result(request_id, call_tool(
