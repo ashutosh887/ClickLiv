@@ -12,17 +12,22 @@ in the wrong minute.
 Five independent paths compute the same number, and gates diff them row for row.
 
 ```
-ch-hackathon-raw-data.csv ──▶ raw_events ──▶ active_intervals ──┬──▶ session_minutes ──▶ minute_occupancy
-ch-hackathon-content-data.csv ──▶ content_meta ──▶ content_dict │                         primary serving path
-                                                                │
-                                                                ├──▶ minute_deltas
-                                                                │    +1/-1 on merged runs, windowed cumsum
-                                                                │
-                                                                └──▶ maxIntersections
-                                                                     arithmetic oracle
+ch-hackathon-content-data.csv ──▶ content_meta ──▶ content_dict
+ch-hackathon-raw-data.csv ──▶ raw_events ──▶ active_intervals
+                                             │
+                                             ├──▶ session_minutes ──▶ minute_occupancy
+                                             │    one row per (session, minute), deduped
+                                             │    PRIMARY SERVING PATH
+                                             │
+                                             ├──▶ minute_deltas
+                                             │    +1/-1 on merged runs, windowed cumsum
+                                             │    SECOND SERVING PATH
+                                             │
+                                             └──▶ maxIntersections
+                                                  arithmetic oracle, no rollup involved
 
-src/clickliv/reference.py reads the CSV directly and owes ClickHouse nothing
-chDB runs 01 through 04 unmodified, in-process, and must land on the same hashes
+src/clickliv/reference.py   reads the CSV directly and owes ClickHouse nothing
+chDB                        runs 01 through 04 unmodified, in-process, same hashes
 ```
 
 Two serving paths that agree is a claim no single path can make. `make verify` proves it:
@@ -228,19 +233,22 @@ in the hot path.
 ## Layout
 
 ```
-sql/01_schema.sql       raw_events, content_meta, content_dict
-sql/02_sessionize.sql   the state machine, as window functions
-sql/03_occupancy.sql    session_minutes and the minute_occupancy rollup
-sql/04_deltas.sql       merged minute runs to signed deltas
-sql/05_oracles.sql      tables the Python reference is loaded into
-src/clickliv/ch.py         HTTP client, one code path for local and Cloud
-src/clickliv/reference.py  ground truth, reads the CSV directly
-src/clickliv/verify.py     Gate A
-src/clickliv/gates.py      Gate B
-src/clickliv/sweep.py      threshold sensitivity grid
-src/clickliv/otel.py       OTLP exporter, spans carry server-side query metrics
-src/clickliv/observe.py    reads the trace back out of ClickStack
-observability/            read-only user for the ClickStack ClickHouse
+sql/01_schema.sql            raw_events, content_meta, content_dict
+sql/02_sessionize.sql        the state machine, as window functions
+sql/03_occupancy.sql         session_minutes and the minute_occupancy rollup
+sql/04_deltas.sql            merged minute runs to signed deltas
+sql/05_oracles.sql           tables the Python reference is loaded into
+src/clickliv/cli.py          command dispatch, identical for local and Cloud
+src/clickliv/ch.py           zero-dependency ClickHouse HTTP client
+src/clickliv/load.py         CSV ingestion, content before events
+src/clickliv/reference.py    ground truth, reads the CSV directly
+src/clickliv/verify.py       Gate A
+src/clickliv/gates.py        Gate B
+src/clickliv/chdb_engine.py  Gate D, the whole pipeline in-process
+src/clickliv/sweep.py        threshold sensitivity grid
+src/clickliv/otel.py         OTLP exporter, spans carry server-side metrics
+src/clickliv/observe.py      reads the trace back out of ClickStack
+observability/               read-only user for the ClickStack ClickHouse
 ```
 
 Thresholds and credentials are `${VAR}` placeholders in the SQL, substituted from the
