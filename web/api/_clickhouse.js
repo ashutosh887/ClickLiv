@@ -1,4 +1,6 @@
-const REQUIRED = ['CH_HOST', 'CH_USER', 'CH_PASSWORD'];
+const USER = 'marts_agent';
+const DATABASE = 'marts';
+const REQUIRED = ['CH_HOST', 'MARTS_PASSWORD'];
 
 export function config() {
   const missing = REQUIRED.filter((name) => !process.env[name]);
@@ -7,9 +9,9 @@ export function config() {
   }
   return {
     host: process.env.CH_HOST,
-    user: process.env.CH_USER,
-    password: process.env.CH_PASSWORD,
-    database: process.env.CH_DATABASE || 'clickliv',
+    user: USER,
+    password: process.env.MARTS_PASSWORD,
+    database: DATABASE,
   };
 }
 

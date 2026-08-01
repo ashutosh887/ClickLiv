@@ -1,4 +1,4 @@
-import { query, send } from './_clickhouse.js';
+import { config, query, send } from './_clickhouse.js';
 
 const GRAINS = { minute: 1, hour: 60, day: 1440 };
 
@@ -44,7 +44,7 @@ export default async function handler(req, res) {
       peak: rows.reduce((most, row) => Math.max(most, row.peak_concurrency), 0),
       rows,
       statistics: result.statistics,
-      served_by: 'marts.v_concurrency as marts_agent, readonly with a query budget',
+      served_by: `marts.v_concurrency as ${config().user}, readonly with a query budget`,
     });
   } catch (error) {
     return send(res, 502, { error: String(error.message || error) }, 0);
