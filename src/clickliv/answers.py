@@ -116,11 +116,10 @@ def capture_explain(ch: ClickHouse, spec: dict, minute_from: int, minute_to: int
     (evidence / f"explain_{spec['label']}.txt").write_text(text)
 
 
-def run(ch: ClickHouse, artifacts: Path) -> bool:
-    answers_dir = Path("answers")
-    evidence_dir = Path("evidence")
-    answers_dir.mkdir(exist_ok=True)
-    evidence_dir.mkdir(exist_ok=True)
+def run(ch: ClickHouse, artifacts: Path, answers_dir: Path = Path("answers"),
+        evidence_dir: Path = Path("evidence")) -> bool:
+    answers_dir.mkdir(parents=True, exist_ok=True)
+    evidence_dir.mkdir(parents=True, exist_ok=True)
 
     minute_from, minute_to = minute_bounds(ch)
     results = [run_benchmark(ch, spec, minute_from, minute_to) for spec in BENCHMARKS]
@@ -136,9 +135,9 @@ def run(ch: ClickHouse, artifacts: Path) -> bool:
         ch, [r["query_id"] for r in results]))
     write_csv(evidence_dir / "oracle_match.csv", [oracle_match(ch, artifacts)])
 
-    print(f"answers/benchmark_answers.csv   {len(results)} rows")
-    print(f"answers/latencies.csv           {len(results)} rows")
-    print(f"evidence/query_log.csv          {len(results)} rows")
-    print(f"evidence/explain_{EVIDENCE_LABEL}.txt")
-    print("evidence/oracle_match.csv       1 row")
+    print(f"{answers_dir}/benchmark_answers.csv   {len(results)} rows")
+    print(f"{answers_dir}/latencies.csv           {len(results)} rows")
+    print(f"{evidence_dir}/query_log.csv          {len(results)} rows")
+    print(f"{evidence_dir}/explain_{EVIDENCE_LABEL}.txt")
+    print(f"{evidence_dir}/oracle_match.csv       1 row")
     return True

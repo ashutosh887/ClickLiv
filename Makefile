@@ -1,7 +1,7 @@
 CLI := uv run --quiet python -m clickliv
 
 .PHONY: up down logs obs obs-up obs-down obs-logs ping schema load reconcile \
-        sessionize occupancy deltas reference verify pipeline all gate-b \
+        sessionize occupancy deltas reference verify pipeline all gate-b gate-c \
         sweep chdb marts answers projections reset
 
 up:
@@ -60,6 +60,9 @@ all:
 
 gate-b:
 	$(CLI) gate-b
+
+gate-c:
+	uv run --quiet --extra embedded python -m clickliv gate-c
 
 sweep:
 	$(CLI) sweep

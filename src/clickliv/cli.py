@@ -142,6 +142,18 @@ def step_gate_b(ch: ClickHouse) -> int:
     return 0 if gates.compare(before, gates.fingerprint(ch)) else 1
 
 
+def step_gate_c(ch: ClickHouse) -> int:
+    from . import gate_c
+    try:
+        ok = gate_c.run(ch)
+    finally:
+        print("\nrestoring the full dataset after the held-out dry run")
+        status = step_all(ch)
+        if status == 0:
+            status = run_step(ch, "marts")
+    return 0 if ok and status == 0 else 1
+
+
 def step_sweep(ch: ClickHouse) -> int:
     from . import sweep
     sweep.run(ch, artifacts_dir(), step_sessionize)
@@ -201,6 +213,7 @@ STEPS = {
     "pipeline": step_pipeline,
     "all": step_all,
     "gate-b": step_gate_b,
+    "gate-c": step_gate_c,
     "sweep": step_sweep,
     "chdb": step_chdb,
     "marts": step_marts,
