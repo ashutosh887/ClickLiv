@@ -153,12 +153,21 @@ def step_chdb(ch: ClickHouse) -> int:
     return 0 if chdb_engine.run(ch, render, SQL_DIR, artifacts_dir()) else 1
 
 
+def step_marts(ch: ClickHouse) -> int:
+    run_sql_file(ch, "06_marts.sql")
+    return 0
+
+
 def step_obs(ch: ClickHouse) -> int:
     from . import observe
     return observe.report()
 
 
 def step_reset(ch: ClickHouse) -> int:
+    ch.command("DROP DATABASE IF EXISTS marts")
+    ch.command("DROP USER IF EXISTS marts_agent")
+    ch.command("DROP ROLE IF EXISTS marts_readonly")
+    ch.command("DROP SETTINGS PROFILE IF EXISTS marts_budget")
     ch.command("DROP DICTIONARY IF EXISTS content_dict")
     for table in ("raw_events", "content_meta", "active_intervals", "session_minutes",
                   "minute_occupancy", "minute_deltas", "ref_intervals", "ref_rollup"):
@@ -182,6 +191,7 @@ STEPS = {
     "gate-b": step_gate_b,
     "sweep": step_sweep,
     "chdb": step_chdb,
+    "marts": step_marts,
     "obs": step_obs,
     "reset": step_reset,
 }
