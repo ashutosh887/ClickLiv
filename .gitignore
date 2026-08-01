@@ -13,4 +13,3 @@ node_modules/
 dist/
 docker/librechat.env
 credentials.env
-credentials.env.example
