@@ -5,6 +5,9 @@ description = "Foreground-only concurrency for SonyLIV streaming telemetry, on C
 requires-python = ">=3.12"
 dependencies = []
 
+[project.optional-dependencies]
+embedded = ["chdb>=4.2.1"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

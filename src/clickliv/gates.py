@@ -27,7 +27,8 @@ def fingerprint(ch: ClickHouse) -> dict[str, tuple[int, int]]:
     return out
 
 
-def compare(first: dict, second: dict) -> bool:
+def compare(first: dict, second: dict,
+            label: str = "Gate B: rebuild is idempotent") -> bool:
     width = max(len(name) for name in first)
     ok = True
     print()
@@ -36,6 +37,9 @@ def compare(first: dict, second: dict) -> bool:
         ok &= same
         rows, digest = second[table]
         print(f"{'PASS' if same else 'FAIL'}  {table:<{width}}  {rows:>9,} rows  "
-              f"hash {digest:016x}" + ("" if same else f"  was {first[table][1]:016x}"))
-    print(f"\nGate B: {'PASS' if ok else 'FAIL'}  rebuild is idempotent")
+              f"hash {digest:016x}"
+              + ("" if same else f"  other side {first[table][0]:,} rows "
+                                 f"hash {first[table][1]:016x}"))
+    head, _, rest = label.partition(": ")
+    print(f"\n{head}: {'PASS' if ok else 'FAIL'}  {rest}")
     return ok

@@ -142,6 +142,11 @@ def step_sweep(ch: ClickHouse) -> int:
     return 0
 
 
+def step_chdb(ch: ClickHouse) -> int:
+    from . import chdb_engine
+    return 0 if chdb_engine.run(ch, render, SQL_DIR, artifacts_dir()) else 1
+
+
 def step_reset(ch: ClickHouse) -> int:
     ch.command("DROP DICTIONARY IF EXISTS content_dict")
     for table in ("raw_events", "content_meta", "active_intervals", "session_minutes",
@@ -165,6 +170,7 @@ STEPS = {
     "all": step_all,
     "gate-b": step_gate_b,
     "sweep": step_sweep,
+    "chdb": step_chdb,
     "reset": step_reset,
 }
 

@@ -1,7 +1,7 @@
 CLI := uv run --quiet python -m clickliv
 
 .PHONY: up down logs ping schema load reconcile sessionize occupancy deltas \
-        reference verify pipeline all gate-b sweep reset
+        reference verify pipeline all gate-b sweep chdb reset
 
 up:
 	docker compose up -d --wait
@@ -50,6 +50,9 @@ gate-b:
 
 sweep:
 	$(CLI) sweep
+
+chdb:
+	uv run --quiet --extra embedded python -m clickliv chdb
 
 reset:
 	$(CLI) reset
