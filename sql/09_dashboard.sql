@@ -17,14 +17,17 @@ FROM marts.v_naive_vs_foreground
 ORDER BY minute;
 
 -- name: concurrency_over_time
+-- Reads the plain view rather than the parameterized v_occupancy_minute. A console
+-- dashboard tile renders the parameterized call as Forbidden, while the same query
+-- succeeds for both the admin user and marts_agent, so the restriction is the console
+-- runner's rather than ours. Checked row for row: both forms return 3,649 rows peaking
+-- at 2,692 on 2026-07-26 10:56 UTC.
 SELECT
-    toDateTime(minute * 60, 'UTC') AS ts,
-    concurrency
-FROM marts.v_occupancy_minute(
-    country = '', platform = '', video_type = '', content_id = 0,
-    minute_from = (SELECT min_minute FROM marts.v_data_window),
-    minute_to = (SELECT max_minute FROM marts.v_data_window))
-ORDER BY minute;
+    minute_utc AS ts,
+    foreground_concurrency AS concurrency
+FROM marts.v_naive_vs_foreground
+WHERE foreground_concurrency > 0
+ORDER BY minute_utc;
 
 -- name: peak_by_platform
 SELECT

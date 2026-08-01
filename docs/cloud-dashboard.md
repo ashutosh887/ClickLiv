@@ -129,19 +129,29 @@ whole claim is that one sits above the other.
 
 ### 3. concurrency_over_time
 
-The answer on its own, through the parameterized view the MCP tools and the API also
-call, so the tile exercises the same path as the rest of the project.
+The answer on its own, read from the same plain view tile 2 uses.
 
 ```sql
 SELECT
-    toDateTime(minute * 60, 'UTC') AS ts,
-    concurrency
-FROM marts.v_occupancy_minute(
-    country = '', platform = '', video_type = '', content_id = 0,
-    minute_from = (SELECT min_minute FROM marts.v_data_window),
-    minute_to = (SELECT max_minute FROM marts.v_data_window))
-ORDER BY minute;
+    minute_utc AS ts,
+    foreground_concurrency AS concurrency
+FROM marts.v_naive_vs_foreground
+WHERE foreground_concurrency > 0
+ORDER BY minute_utc;
 ```
+
+**Do not use the parameterized form here.** The obvious version calls
+`marts.v_occupancy_minute(...)` with `minute_from` and `minute_to` read from
+`v_data_window`, which is nicer because it exercises the same path the MCP tools and the
+API use. A console dashboard tile renders it as **Forbidden**. The SQL and the grants are
+both fine: the identical query succeeds for the admin user and for the least privileged
+`marts_agent`, and the console's own user holds a global SELECT. The only structural
+difference is the parameterized view invocation, so the console's dashboard runner
+appears not to permit it. Tiles 1 and 2 read plain views and are unaffected.
+
+The replacement above was checked row for row against the parameterized version: both
+return 3,649 rows and both peak at 2,692 on 2026-07-26 10:56 UTC, and the two result sets
+are identical.
 
 Expect 3,649 rows. Starts at 1 on 2026-07-14 15:43 UTC, stays low for most of the
 window, climbs to a single sharp spike on 2026-07-26 topping out at **2,692** at 10:56
@@ -245,7 +255,9 @@ And p99 stays comfortably under 200 ms.
 **Visualization type: Table.** One row, seven columns, no time axis to plot.
 
 If `replicas_reporting` comes back 1 the service scaled down to a single replica. If
-`queries` comes back 0 the query log rotated, so run query 3 once and refresh the tile.
+`queries` comes back 0 the query log rotated. Query 3 no longer touches these views, so
+refill the log by asking the chat one question, or loading the Vercel dashboard, or
+running `make answers`, then refresh the tile.
 
 ## Step 2, build the dashboard
 
