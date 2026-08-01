@@ -24,7 +24,9 @@ CREATE DATABASE ${MARTS_DB};
 -- subtitle_language does the same, so folding unconditionally would silently merge two
 -- real values and inflate the answer. So the rule is: if the value the caller passed
 -- exists exactly, match it exactly; only when it matches nothing at all does the case
--- fold apply. 'hin' stays 1,614, 'HIN' stays its own slice, and 'LIVE' still finds live.
+-- fold apply, and then only when it would land on exactly one real value. 'hin' stays
+-- 1,614, 'HIN' stays its own slice, 'LIVE' still finds live, and a third casing such as
+-- 'Hin' that would merge both matches nothing at all rather than reporting 1,899.
 --
 -- Every one of the eight sort key dimensions is a parameter here, so one view really does
 -- answer any filter combination rather than the common four.
@@ -35,6 +37,30 @@ CREATE DATABASE ${MARTS_DB};
 -- would force granting the raw serving tables too and defeat the whole point of a
 -- marts surface. Verified: an invoker-rights view 403s for marts_agent even though
 -- the view itself is granted; a DEFINER view does not.
+-- The distinct values of every string dimension, materialized once at build time. The
+-- case-fold fallback below has to ask "does this value exist exactly", and asking that of
+-- minute_occupancy costs a full scan per filtered dimension: eight filters read 871,362
+-- rows where none read 96,818, which wipes out the read advantage the whole design is for.
+-- Against this table the same test is a few hundred rows. Rebuilt whenever marts is.
+CREATE TABLE ${MARTS_DB}.dimension_value
+(
+    `dimension` LowCardinality(String) COMMENT 'Which filter parameter this value belongs to.',
+    `value`     String                 COMMENT 'A value that dimension actually takes.'
+)
+ENGINE = MergeTree
+ORDER BY (dimension, value)
+COMMENT 'Distinct values per string dimension, so the case-fold fallback is a small lookup rather than a scan of the serving table. Use v_dimension_values for the readable form with minute counts.';
+
+INSERT INTO ${MARTS_DB}.dimension_value
+SELECT 'country', toString(country) FROM minute_occupancy GROUP BY country
+UNION ALL SELECT 'platform', toString(platform) FROM minute_occupancy GROUP BY platform
+UNION ALL SELECT 'video_type', toString(video_type) FROM minute_occupancy GROUP BY video_type
+UNION ALL SELECT 'category', toString(category) FROM minute_occupancy GROUP BY category
+UNION ALL SELECT 'app_version', toString(app_version) FROM minute_occupancy GROUP BY app_version
+UNION ALL SELECT 'player_version', toString(player_version) FROM minute_occupancy GROUP BY player_version
+UNION ALL SELECT 'audio_language', toString(audio_language) FROM minute_occupancy GROUP BY audio_language
+UNION ALL SELECT 'subtitle_language', toString(subtitle_language) FROM minute_occupancy GROUP BY subtitle_language;
+
 CREATE VIEW ${MARTS_DB}.v_occupancy_full
 (
     `minute`      UInt32 COMMENT 'Minutes since the unix epoch. Multiply by 60 for a unix timestamp. Query the v_data_window view for the range this dataset actually covers.',
@@ -45,14 +71,14 @@ COMMENT 'Parameterized, one parameter per filterable dimension: country, platfor
 AS
 SELECT minute, sum(sessions) AS concurrency
 FROM minute_occupancy
-WHERE (lower(trimBoth({country:String}))           IN ('', 'all', 'any', 'none', 'null', '*', '%') OR country           = trimBoth({country:String})           OR (lower(country)           = lower(trimBoth({country:String}))           AND trimBoth({country:String})           NOT IN (SELECT country           FROM minute_occupancy)))
-  AND (lower(trimBoth({platform:String}))          IN ('', 'all', 'any', 'none', 'null', '*', '%') OR platform          = trimBoth({platform:String})          OR (lower(platform)          = lower(trimBoth({platform:String}))          AND trimBoth({platform:String})          NOT IN (SELECT platform          FROM minute_occupancy)))
-  AND (lower(trimBoth({video_type:String}))        IN ('', 'all', 'any', 'none', 'null', '*', '%') OR video_type        = trimBoth({video_type:String})        OR (lower(video_type)        = lower(trimBoth({video_type:String}))        AND trimBoth({video_type:String})        NOT IN (SELECT video_type        FROM minute_occupancy)))
-  AND (lower(trimBoth({category:String}))          IN ('', 'all', 'any', 'none', 'null', '*', '%') OR category          = trimBoth({category:String})          OR (lower(category)          = lower(trimBoth({category:String}))          AND trimBoth({category:String})          NOT IN (SELECT category          FROM minute_occupancy)))
-  AND (lower(trimBoth({app_version:String}))       IN ('', 'all', 'any', 'none', 'null', '*', '%') OR app_version       = trimBoth({app_version:String})       OR (lower(app_version)       = lower(trimBoth({app_version:String}))       AND trimBoth({app_version:String})       NOT IN (SELECT app_version       FROM minute_occupancy)))
-  AND (lower(trimBoth({player_version:String}))    IN ('', 'all', 'any', 'none', 'null', '*', '%') OR player_version    = trimBoth({player_version:String})    OR (lower(player_version)    = lower(trimBoth({player_version:String}))    AND trimBoth({player_version:String})    NOT IN (SELECT player_version    FROM minute_occupancy)))
-  AND (lower(trimBoth({audio_language:String}))    IN ('', 'all', 'any', 'none', 'null', '*', '%') OR audio_language    = trimBoth({audio_language:String})    OR (lower(audio_language)    = lower(trimBoth({audio_language:String}))    AND trimBoth({audio_language:String})    NOT IN (SELECT audio_language    FROM minute_occupancy)))
-  AND (lower(trimBoth({subtitle_language:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR subtitle_language = trimBoth({subtitle_language:String}) OR (lower(subtitle_language) = lower(trimBoth({subtitle_language:String})) AND trimBoth({subtitle_language:String}) NOT IN (SELECT subtitle_language FROM minute_occupancy)))
+WHERE (lower(trimBoth({country:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR country = trimBoth({country:String}) OR (lower(country) = lower(trimBoth({country:String})) AND trimBoth({country:String}) NOT IN (SELECT value FROM ${MARTS_DB}.dimension_value WHERE dimension = 'country') AND (SELECT uniqExact(value) FROM ${MARTS_DB}.dimension_value WHERE dimension = 'country' AND lower(value) = lower(trimBoth({country:String}))) = 1))
+  AND (lower(trimBoth({platform:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR platform = trimBoth({platform:String}) OR (lower(platform) = lower(trimBoth({platform:String})) AND trimBoth({platform:String}) NOT IN (SELECT value FROM ${MARTS_DB}.dimension_value WHERE dimension = 'platform') AND (SELECT uniqExact(value) FROM ${MARTS_DB}.dimension_value WHERE dimension = 'platform' AND lower(value) = lower(trimBoth({platform:String}))) = 1))
+  AND (lower(trimBoth({video_type:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR video_type = trimBoth({video_type:String}) OR (lower(video_type) = lower(trimBoth({video_type:String})) AND trimBoth({video_type:String}) NOT IN (SELECT value FROM ${MARTS_DB}.dimension_value WHERE dimension = 'video_type') AND (SELECT uniqExact(value) FROM ${MARTS_DB}.dimension_value WHERE dimension = 'video_type' AND lower(value) = lower(trimBoth({video_type:String}))) = 1))
+  AND (lower(trimBoth({category:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR category = trimBoth({category:String}) OR (lower(category) = lower(trimBoth({category:String})) AND trimBoth({category:String}) NOT IN (SELECT value FROM ${MARTS_DB}.dimension_value WHERE dimension = 'category') AND (SELECT uniqExact(value) FROM ${MARTS_DB}.dimension_value WHERE dimension = 'category' AND lower(value) = lower(trimBoth({category:String}))) = 1))
+  AND (lower(trimBoth({app_version:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR app_version = trimBoth({app_version:String}) OR (lower(app_version) = lower(trimBoth({app_version:String})) AND trimBoth({app_version:String}) NOT IN (SELECT value FROM ${MARTS_DB}.dimension_value WHERE dimension = 'app_version') AND (SELECT uniqExact(value) FROM ${MARTS_DB}.dimension_value WHERE dimension = 'app_version' AND lower(value) = lower(trimBoth({app_version:String}))) = 1))
+  AND (lower(trimBoth({player_version:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR player_version = trimBoth({player_version:String}) OR (lower(player_version) = lower(trimBoth({player_version:String})) AND trimBoth({player_version:String}) NOT IN (SELECT value FROM ${MARTS_DB}.dimension_value WHERE dimension = 'player_version') AND (SELECT uniqExact(value) FROM ${MARTS_DB}.dimension_value WHERE dimension = 'player_version' AND lower(value) = lower(trimBoth({player_version:String}))) = 1))
+  AND (lower(trimBoth({audio_language:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR audio_language = trimBoth({audio_language:String}) OR (lower(audio_language) = lower(trimBoth({audio_language:String})) AND trimBoth({audio_language:String}) NOT IN (SELECT value FROM ${MARTS_DB}.dimension_value WHERE dimension = 'audio_language') AND (SELECT uniqExact(value) FROM ${MARTS_DB}.dimension_value WHERE dimension = 'audio_language' AND lower(value) = lower(trimBoth({audio_language:String}))) = 1))
+  AND (lower(trimBoth({subtitle_language:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR subtitle_language = trimBoth({subtitle_language:String}) OR (lower(subtitle_language) = lower(trimBoth({subtitle_language:String})) AND trimBoth({subtitle_language:String}) NOT IN (SELECT value FROM ${MARTS_DB}.dimension_value WHERE dimension = 'subtitle_language') AND (SELECT uniqExact(value) FROM ${MARTS_DB}.dimension_value WHERE dimension = 'subtitle_language' AND lower(value) = lower(trimBoth({subtitle_language:String}))) = 1))
   AND content_id = coalesce(nullIf({content_id:UInt64}, toUInt64(0)), content_id)
   AND minute BETWEEN {minute_from:UInt32} AND {minute_to:UInt32}
 GROUP BY minute
@@ -158,7 +184,11 @@ SELECT
 FROM minute_occupancy;
 
 -- Every value each string dim can take, so a filter is picked from the data rather
--- than guessed. Deliberately no peak column: a peak per value has to sum across the
+-- than guessed. The empty value is left out on purpose: a dimension can genuinely hold
+-- one, video_type does, but the empty string is also the no-filter sentinel, so passing
+-- it back as a filter returns the whole dataset rather than that slice. Publishing it as
+-- selectable is a trap, so the rows a caller can act on are the only rows listed.
+-- Deliberately no peak column: a peak per value has to sum across the
 -- other dims before taking the maximum (D6), and a GROUP BY here would take the
 -- maximum first and publish a number that is quietly too small. Use v_concurrency
 -- with the dim filtered, or the top_slices MCP tool, for peaks.
@@ -200,6 +230,7 @@ SELECT * FROM (
     SELECT 'subtitle_language', toString(subtitle_language), uniqExact(minute), min(minute), max(minute)
     FROM minute_occupancy GROUP BY subtitle_language
 )
+WHERE value != ''
 ORDER BY dimension, minutes_present DESC, value;
 
 -- Titles, so "how many watched X at its peak" resolves to a content_id instead of
