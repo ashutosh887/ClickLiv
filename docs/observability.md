@@ -64,6 +64,33 @@ synchronous MergeTree inserts and the panel that would move first on a live feed
 over the same client that runs the pipeline. ClickHouse is the analytical engine on both
 sides of the integration.
 
+### The hosted ClickStack
+
+The demo instance is the same all-in-one image on EC2, behind Caddy, with OTLP published
+over TLS at `https://otlp.15-252-63-157.sslip.io` so a pipeline run anywhere can export
+to it. Point `CLICKSTACK_OTLP` at that host, set `CLICKSTACK_KEY` to the team ingestion
+key, and the spans land in the hosted HyperDX. That is how the traces on it got there:
+real runs of `all`, `answers`, `crossover`, `userlevel`, `instantaneous`, `decline`,
+`submission` and `ping`, nothing hand written.
+
+`docker/clickstack_provision.py` creates what the instance shows on arrival: a dashboard
+named **ClickLiv pipeline telemetry** and two saved searches, all three starred. Its
+tiles are raw SQL against `otel_traces`, deliberately with no time macro, so they read the
+whole history rather than whatever range the viewer happens to have selected:
+
+```sh
+HYPERDX_URL=https://clickstack.15-252-63-157.sslip.io \
+HYPERDX_EMAIL=... HYPERDX_PASSWORD=... python3 docker/clickstack_provision.py
+```
+
+It is idempotent, it looks the trace source and connection up by kind rather than by id,
+and it runs on the standard library like everything else here. HyperDX keeps dashboards,
+saved searches, sources and favourites in the MongoDB inside the container, which
+`docker-compose.yml` mounts on the named volume `hdx-db`, so all of it survives
+`docker compose down` and comes back on the next `up`. A cron on the instance runs
+`clickliv ping` every ten minutes, which keeps a live trace inside the default one hour
+window and keeps the Cloud service awake for the demo.
+
 ## Langfuse 4.1.0, with a ClickHouse product on both sides of it
 
 `make llm-up` brings it up self-hosted, from `docker compose --profile llm`. The
