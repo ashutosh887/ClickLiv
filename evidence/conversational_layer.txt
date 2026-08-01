@@ -34,3 +34,146 @@ verification not required since ALLOW_EMAIL_LOGIN is on with no mail
 server configured. In the UI, the MCP tool picker must have
 clickliv-marts turned on for the guardrailed surface to answer; it is
 off by default per message.
+
+================================================================
+2026-08-01, second pass: the guardrailed surface was never actually
+attached, and the sentinel that made it lie
+================================================================
+
+-- what failed, reproduced verbatim before any change
+
+asked "What has been the most busiest time?" then "As per our records
+on the Clickhouse?", the model reached past the guardrailed tools for
+the raw SQL escape hatch and emitted:
+
+  SELECT bucket_minute, peak_concurrency
+  FROM marts.v_concurrency(
+    country='ALL', platform='ALL', video_type='ALL', content_id=0,
+    minute_from=toUInt32(toUnixTimestamp(now() - INTERVAL 30 DAY) / 60),
+    minute_to=toUInt32(toUnixTimestamp(now()) / 60),
+    grain_minutes=1)
+  ORDER BY peak_concurrency DESC LIMIT 1;
+
+run against Cloud that returned 0 rows, and the model then asked the
+user which filter values were valid. The empty string was the only
+accepted "no filter" sentinel, so 'ALL' matched no row; country only
+ever holds 'india'.
+
+-- root cause underneath that, found while proving the fix
+
+the marts MCP server bound 127.0.0.1:8765. On Linux the LibreChat
+container reaches the host through host.docker.internal, which is the
+docker bridge address, not loopback. So on EC2 clickliv-marts attached
+ZERO tools while its serverInstructions were still injected, and every
+answer came from the escape hatch wearing the guardrailed surface's
+name. Fixed by binding every interface, MCP_HOST narrows it again.
+Contained by the security group: clickliv-demo-sg has no 8765 rule and
+an off-box curl to 15.252.63.157:8765 times out (exit 28).
+
+  ss before   LISTEN 0 5   127.0.0.1:8765
+  ss after    LISTEN 0 5     0.0.0.0:8765
+
+-- the same query after the fix, byte for byte the same SQL
+
+  bucket_minute  peak_concurrency
+  29751056       2692
+  [1 rows]
+
+-- sentinel sweep, all against marts.v_concurrency unfiltered
+
+  ''  ALL  all  All  *  any  ANY  null  NULL  None  %  ' ALL '   ->  2692 each
+
+-- known-good numbers held throughout
+
+  unfiltered peak        2692
+  ANDROID_PHONE peak     1704
+  live 425, vod 2222, audio_language hin 1614, naive peak 3743
+
+-- case folding, and the collision it nearly caused
+
+"LIVE" and "VOD" used to match nothing and answered a confident 0.
+Folding case unconditionally was worse: audio_language holds both 'hin'
+and 'HIN' as distinct slices, subtitle_language the same, so a blanket
+fold turned the 1,614 headline into 1,899. Final rule is exact match
+wins, case fold only when nothing matches exactly.
+
+  live 425   LIVE 425   vod 2222   VOD 2222
+  hin 1614   HIN 309    android_phone 1704   NOPE 0 rows
+
+-- guardrails re-checked after every marts rebuild
+
+  marts_agent SELECT clickliv.raw_events        Code 497
+  marts_agent SELECT clickliv.minute_occupancy  Code 497
+  marts_agent SELECT system.query_log           Code 497
+  marts_agent SET max_execution_time = 600      Code 164
+  mcp_agent   SELECT system.query_log           Code 497
+  mcp_agent   SET max_execution_time = 600      Code 164
+
+  mcp_agent CAN read clickliv.* by design, it is the escape hatch's
+  user; that grant predates this pass and was left alone.
+
+-- LibreChat driven end to end, local, clickliv-marts ONLY so there is
+-- no escape hatch to fall back on
+
+Q: What has been the most busiest time?
+   tool: concurrency_peak_mcp_clickliv-marts {}
+   answer, verbatim:
+   "The busiest time (highest per-minute foreground concurrency) was
+   2026-07-26 10:56 UTC, reaching a peak concurrency of 2,692.
+   Source: guardrailed ClickLiv marts surface, concurrency_peak."
+   conversation 4486eb49-5802-47af-be3f-7a2b8a93859e
+
+Q: As per our records on the Clickhouse?
+   tool: concurrency_peak_mcp_clickliv-marts {}
+   answered 2,692 at 2026-07-26 10:56 UTC from the marts surface, the
+   exact follow-up that previously produced the 0-row SQL.
+   conversation 4029b77f-1919-4051-bd1b-dc3caba4a4dc
+
+Q: how does live compare to vod?
+   two calls, {"video_type":"live"} and {"video_type":"vod"}
+   answered live 425 at 10:42 UTC, vod 2222 at 11:01 UTC.
+   previously answered "LIVE and VOD both show 0".
+   conversation c49a25cc-8925-4bd5-aad1-553b98306ffe
+
+Q: peak on android phone?
+   one call, {"platform":"ANDROID_PHONE"}, answered 1,704 at 10:56 UTC.
+   previously stalled asking the user for a time window.
+   conversation 53fe177b-a052-47fe-8a63-25d1aa96c967
+
+Q: avg vs peak?
+   answered peak 2,692 and average 34.8 over 3,649 active minutes.
+   previously stalled asking for a time window.
+   conversation 40a61c64-a57e-4592-809c-d74ea3e6f40f
+
+Q: how many people watched Bigg Boss at its peak?
+   tool: concurrency_peak_mcp_clickliv-marts {"title":"Bigg Boss"}
+   tool refused: no title in this dataset matches 'Bigg Boss'
+   answer, verbatim: "The guardrailed ClickLiv marts surface doesn't
+   contain any title matching 'Bigg Boss', so I can't report its peak
+   concurrency from this dataset."
+   previously answered 2,692, the unfiltered total, labelled as Bigg
+   Boss and given a source citation.
+   conversation e463b29e-64e4-436c-822b-11a9b996ab05
+
+-- with the escape hatch enabled as well, for the two questions the
+-- guardrailed tools deliberately do not cover
+
+Q: how much would we overcount if we counted every open session
+   instead of only foreground ones?
+   tool: run_query_mcp_clickhouse-official
+         SELECT * FROM marts.v_overcount
+   answered peak overcount 39.04% (foreground 2,692 at 10:56 UTC
+   against naive 3,743 at 10:59 UTC) and average overcount 49.03%
+   (24.19 against 36.05). The thesis is now a query, not prose.
+   conversation de2fcbe9-94e1-4c3f-90c0-c27d6b11afe0
+
+Q: what is the peak concurrency for hindi audio?
+   read marts.v_data_window, then marts.v_concurrency_full with
+   audio_language = 'hin', answered 1,899 at 2026-07-26 10:57 UTC.
+   note 1,899 is the case-folded figure from that run, before the
+   exact-match-wins fix landed; 'hin' alone is 1,614.
+   conversation 274d9d70-2926-4ec9-a788-ea95559e9a01
+
+login for the demo is in credentials.env, gitignored, local only. In
+the UI the MCP tool picker must have clickliv-marts turned on for the
+guardrailed surface to answer; it is off by default per message.
