@@ -39,6 +39,12 @@ CALL_ARGS = (
 )
 
 
+def marts(ch: ClickHouse) -> str:
+    """A scratch run must answer from its own marts, never from the primary one."""
+    from .cli import marts_database
+    return marts_database()
+
+
 def minute_bounds(ch: ClickHouse) -> tuple[int, int]:
     lo, hi = ch.query("SELECT min(minute), max(minute) FROM minute_occupancy").rows[0]
     if lo is None or hi is None:
@@ -55,7 +61,7 @@ def run_benchmark(ch: ClickHouse, spec: dict, minute_from: int, minute_to: int) 
         f"SELECT max(peak_concurrency) AS peak, "
         f"sum(average_concurrency * minutes_in_bucket) / sum(minutes_in_bucket) AS avg, "
         f"sum(minutes_in_bucket) AS active_minutes "
-        f"FROM marts.v_concurrency({args})", query_id=query_id).rows[0]
+        f"FROM {marts(ch)}.v_concurrency({args})", query_id=query_id).rows[0]
     peak, avg, active_minutes = rows
     return {
         "query_label": spec["label"],
@@ -107,7 +113,7 @@ def write_csv(path: Path, rows: list[dict]) -> None:
 def capture_explain(ch: ClickHouse, spec: dict, minute_from: int, minute_to: int,
                      evidence: Path) -> None:
     args = CALL_ARGS.format(**spec, minute_from=minute_from, minute_to=minute_to)
-    query = f"SELECT * FROM marts.v_concurrency({args})"
+    query = f"SELECT * FROM {marts(ch)}.v_concurrency({args})"
     plan = ch.query(f"EXPLAIN indexes = 1 {query}").rows
     text = "-- EXPLAIN indexes = 1\n" + "\n".join(r[0] for r in plan)
     try:
