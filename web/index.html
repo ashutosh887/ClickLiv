@@ -60,9 +60,9 @@
 
   <div class="stats">
     <div class="stat"><div class="k">Peak, foreground only</div><div class="v accent" id="peak">&hellip;</div></div>
-    <div class="stat"><div class="k">Naive, any open session</div><div class="v">3,743</div></div>
-    <div class="stat"><div class="k">Overcount avoided</div><div class="v">39%</div></div>
-    <div class="stat"><div class="k">Serving p99</div><div class="v">30 ms</div></div>
+    <div class="stat"><div class="k">Naive, any open session</div><div class="v" id="naive">&hellip;</div></div>
+    <div class="stat"><div class="k">Overcount avoided</div><div class="v" id="overcount">&hellip;</div></div>
+    <div class="stat"><div class="k">Server time, this query</div><div class="v" id="served">&hellip;</div></div>
   </div>
 
   <div class="controls">
@@ -104,6 +104,11 @@ async function loadDimensions() {
     $('videoType').insertAdjacentHTML('beforeend',
       `<option value="${row.name}">${row.name} (${fmt(row.peak)})</option>`);
   }
+  const head = data.headline;
+  if (!head) return;
+  $('naive').textContent = fmt(head.naive_peak);
+  $('overcount').textContent = `${head.peak_overcount_pct.toFixed(0)}%`;
+  $('served').textContent = `${fmt(head.server_ms)} ms`;
 }
 
 function draw(rows) {
