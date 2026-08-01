@@ -1,0 +1,17 @@
+<clickhouse>
+  <profiles>
+    <clickliv_readonly>
+      <readonly>1</readonly>
+      <max_execution_time>30</max_execution_time>
+    </clickliv_readonly>
+  </profiles>
+  <users>
+    <clickliv>
+      <password>clickliv</password>
+      <networks><ip>::/0</ip></networks>
+      <profile>clickliv_readonly</profile>
+      <quota>default</quota>
+      <default_database>default</default_database>
+    </clickliv>
+  </users>
+</clickhouse>

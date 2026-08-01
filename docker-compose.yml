@@ -22,6 +22,24 @@ services:
       timeout: 3s
       retries: 30
 
+  clickstack:
+    image: clickhouse/clickstack-all-in-one:latest
+    container_name: clickliv-clickstack
+    profiles: ["obs"]
+    ports:
+      - "8080:8080"
+      - "4317:4317"
+      - "4318:4318"
+      - "8124:8123"
+    volumes:
+      - ./observability/clickliv-user.xml:/etc/clickhouse-server/users.d/clickliv.xml:ro
+      - hdx-db:/data/db
+      - hdx-data:/var/lib/clickhouse
+      - hdx-logs:/var/log/clickhouse-server
+
 volumes:
   ch-data:
   ch-logs:
+  hdx-db:
+  hdx-data:
+  hdx-logs:
