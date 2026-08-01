@@ -17,10 +17,14 @@ CREATE DATABASE ${MARTS_DB};
 -- None of them collide with a real value (india, live, vod, the platform names), so the
 -- semantics for real values are untouched.
 --
--- Real values match case-insensitively for the same reason. A model asked to compare live
--- against vod writes 'LIVE' and 'VOD', which used to match nothing and came back as a
--- confident zero rather than an error. The dimensions have no two values that differ only
--- by case, so folding case cannot merge two distinct slices.
+-- Real values fall back to a case-insensitive match, but an exact match always wins. A
+-- model asked to compare live against vod writes 'LIVE' and 'VOD', which used to match
+-- nothing and came back as a confident zero rather than an error. Blanket case folding
+-- would be worse: audio_language holds both 'hin' and 'HIN' as distinct slices, and
+-- subtitle_language does the same, so folding unconditionally would silently merge two
+-- real values and inflate the answer. So the rule is: if the value the caller passed
+-- exists exactly, match it exactly; only when it matches nothing at all does the case
+-- fold apply. 'hin' stays 1,614, 'HIN' stays its own slice, and 'LIVE' still finds live.
 --
 -- Every one of the eight sort key dimensions is a parameter here, so one view really does
 -- answer any filter combination rather than the common four.
@@ -37,18 +41,18 @@ CREATE VIEW ${MARTS_DB}.v_occupancy_full
     `concurrency` UInt64 COMMENT 'Foreground-only concurrent sessions in that minute, summed across every dimension left unfiltered.'
 )
 DEFINER = ${CH_USER} SQL SECURITY DEFINER
-COMMENT 'Parameterized, one parameter per filterable dimension: country, platform, video_type, category, app_version, player_version, audio_language, subtitle_language, content_id, minute_from, minute_to. All eleven are required. For no filter on a string dimension pass an empty string, or ALL, ANY, NONE, NULL, * or % in any case; for no filter on content_id pass 0. Real values match case insensitively. Valid values are in v_dimension_values, titles are in v_titles, and the minute range is in v_data_window.'
+COMMENT 'Parameterized, one parameter per filterable dimension: country, platform, video_type, category, app_version, player_version, audio_language, subtitle_language, content_id, minute_from, minute_to. All eleven are required. For no filter on a string dimension pass an empty string, or ALL, ANY, NONE, NULL, * or % in any case; for no filter on content_id pass 0. An exact value always wins; a value that matches nothing exactly falls back to a case-insensitive match, so LIVE finds live while hin and HIN stay distinct. Valid values are in v_dimension_values, titles are in v_titles, and the minute range is in v_data_window.'
 AS
 SELECT minute, sum(sessions) AS concurrency
 FROM minute_occupancy
-WHERE (lower(trimBoth({country:String}))           IN ('', 'all', 'any', 'none', 'null', '*', '%') OR lower(country)           = lower(trimBoth({country:String})))
-  AND (lower(trimBoth({platform:String}))          IN ('', 'all', 'any', 'none', 'null', '*', '%') OR lower(platform)          = lower(trimBoth({platform:String})))
-  AND (lower(trimBoth({video_type:String}))        IN ('', 'all', 'any', 'none', 'null', '*', '%') OR lower(video_type)        = lower(trimBoth({video_type:String})))
-  AND (lower(trimBoth({category:String}))          IN ('', 'all', 'any', 'none', 'null', '*', '%') OR lower(category)          = lower(trimBoth({category:String})))
-  AND (lower(trimBoth({app_version:String}))       IN ('', 'all', 'any', 'none', 'null', '*', '%') OR lower(app_version)       = lower(trimBoth({app_version:String})))
-  AND (lower(trimBoth({player_version:String}))    IN ('', 'all', 'any', 'none', 'null', '*', '%') OR lower(player_version)    = lower(trimBoth({player_version:String})))
-  AND (lower(trimBoth({audio_language:String}))    IN ('', 'all', 'any', 'none', 'null', '*', '%') OR lower(audio_language)    = lower(trimBoth({audio_language:String})))
-  AND (lower(trimBoth({subtitle_language:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR lower(subtitle_language) = lower(trimBoth({subtitle_language:String})))
+WHERE (lower(trimBoth({country:String}))           IN ('', 'all', 'any', 'none', 'null', '*', '%') OR country           = trimBoth({country:String})           OR (lower(country)           = lower(trimBoth({country:String}))           AND trimBoth({country:String})           NOT IN (SELECT country           FROM minute_occupancy)))
+  AND (lower(trimBoth({platform:String}))          IN ('', 'all', 'any', 'none', 'null', '*', '%') OR platform          = trimBoth({platform:String})          OR (lower(platform)          = lower(trimBoth({platform:String}))          AND trimBoth({platform:String})          NOT IN (SELECT platform          FROM minute_occupancy)))
+  AND (lower(trimBoth({video_type:String}))        IN ('', 'all', 'any', 'none', 'null', '*', '%') OR video_type        = trimBoth({video_type:String})        OR (lower(video_type)        = lower(trimBoth({video_type:String}))        AND trimBoth({video_type:String})        NOT IN (SELECT video_type        FROM minute_occupancy)))
+  AND (lower(trimBoth({category:String}))          IN ('', 'all', 'any', 'none', 'null', '*', '%') OR category          = trimBoth({category:String})          OR (lower(category)          = lower(trimBoth({category:String}))          AND trimBoth({category:String})          NOT IN (SELECT category          FROM minute_occupancy)))
+  AND (lower(trimBoth({app_version:String}))       IN ('', 'all', 'any', 'none', 'null', '*', '%') OR app_version       = trimBoth({app_version:String})       OR (lower(app_version)       = lower(trimBoth({app_version:String}))       AND trimBoth({app_version:String})       NOT IN (SELECT app_version       FROM minute_occupancy)))
+  AND (lower(trimBoth({player_version:String}))    IN ('', 'all', 'any', 'none', 'null', '*', '%') OR player_version    = trimBoth({player_version:String})    OR (lower(player_version)    = lower(trimBoth({player_version:String}))    AND trimBoth({player_version:String})    NOT IN (SELECT player_version    FROM minute_occupancy)))
+  AND (lower(trimBoth({audio_language:String}))    IN ('', 'all', 'any', 'none', 'null', '*', '%') OR audio_language    = trimBoth({audio_language:String})    OR (lower(audio_language)    = lower(trimBoth({audio_language:String}))    AND trimBoth({audio_language:String})    NOT IN (SELECT audio_language    FROM minute_occupancy)))
+  AND (lower(trimBoth({subtitle_language:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR subtitle_language = trimBoth({subtitle_language:String}) OR (lower(subtitle_language) = lower(trimBoth({subtitle_language:String})) AND trimBoth({subtitle_language:String}) NOT IN (SELECT subtitle_language FROM minute_occupancy)))
   AND content_id = coalesce(nullIf({content_id:UInt64}, toUInt64(0)), content_id)
   AND minute BETWEEN {minute_from:UInt32} AND {minute_to:UInt32}
 GROUP BY minute
@@ -64,7 +68,7 @@ CREATE VIEW ${MARTS_DB}.v_occupancy_minute
     `concurrency` UInt64 COMMENT 'Foreground-only concurrent sessions in that minute, summed across every dimension left unfiltered.'
 )
 DEFINER = ${CH_USER} SQL SECURITY DEFINER
-COMMENT 'Parameterized. Call as v_occupancy_minute(country=..., platform=..., video_type=..., content_id=..., minute_from=..., minute_to=...); all six are required. For no filter pass an empty string, or ALL, ANY, NONE, NULL, * or % in any case, and pass content_id = 0. Real values match case insensitively. For category, app_version, player_version, audio_language or subtitle_language use v_occupancy_full instead. Valid values are in v_dimension_values and the minute range is in v_data_window.'
+COMMENT 'Parameterized. Call as v_occupancy_minute(country=..., platform=..., video_type=..., content_id=..., minute_from=..., minute_to=...); all six are required. For no filter pass an empty string, or ALL, ANY, NONE, NULL, * or % in any case, and pass content_id = 0. An exact value always wins; a value that matches nothing exactly falls back to a case-insensitive match, so LIVE finds live while hin and HIN stay distinct. For category, app_version, player_version, audio_language or subtitle_language use v_occupancy_full instead. Valid values are in v_dimension_values and the minute range is in v_data_window.'
 AS
 SELECT minute, concurrency
 FROM ${MARTS_DB}.v_occupancy_full(

@@ -58,6 +58,12 @@ mcpServers:
       so and returns no number. Report that plainly. Never answer a question about
       one title with the figure for everything.
 
+      These tools filter on platform, country, video_type and title or content_id.
+      A question about category, app_version, player_version, audio_language or
+      subtitle_language needs marts.v_concurrency_full on the clickhouse-official
+      surface instead. Go and run it there and give the number, labelled as an ad
+      hoc query. Do not stop to ask the user for permission to switch surface.
+
       Always tell the user that the answer came from the guardrailed ClickLiv
       marts surface, and name the tool you called.
 
@@ -90,8 +96,28 @@ mcpServers:
       Times are stored as minutes since the unix epoch, so a unix timestamp divided
       by 60, not as dates.
 
-      marts.v_occupancy_minute and marts.v_concurrency are parameterized views and
-      every parameter is required. For no filter on a string dimension pass an
+      The marts concurrency views are PARAMETERIZED views. Parameters go inside the
+      parentheses of the table reference as name = value. They are not columns, so
+      a WHERE clause on them fails with "unknown expression identifier", and a
+      positional call fails with "substitution is not set". This is the shape, copy
+      it and change the values:
+
+        SELECT bucket_minute, peak_concurrency
+        FROM marts.v_concurrency_full(
+            country = '', platform = '', video_type = '', category = '',
+            app_version = '', player_version = '', audio_language = 'hin',
+            subtitle_language = '', content_id = 0,
+            minute_from = 29734063, minute_to = 29751090, grain_minutes = 1)
+        ORDER BY peak_concurrency DESC
+        LIMIT 1
+
+      Look the value up before you use it. Language codes are three letters, hin
+      rather than hindi, and every accepted value of every dimension is one query
+      away in marts.v_dimension_values. Guessing a value that does not exist
+      returns zero rows, which reads like an answer and is not one.
+
+      marts.v_occupancy_minute and marts.v_concurrency are the same thing with the
+      four common dimensions only, and every parameter is required. For no filter on a string dimension pass an
       empty string. ALL, ANY, NONE, NULL, * and % are also accepted in any case and
       mean the same thing. For no filter on content_id pass 0. Real values are case
       sensitive and the only ones that exist are listed by
@@ -117,6 +143,10 @@ mcpServers:
       All eight dimensions are filterable through marts.v_occupancy_full and
       marts.v_concurrency_full, which add category, app_version, player_version,
       audio_language and subtitle_language to the four the shorter views take.
+      That is what this surface is for, so when the guardrailed tools cannot take
+      the filter, run the query here and answer, rather than telling the user the
+      question cannot be answered or asking whether to try. Say plainly that it was
+      an ad hoc query and show the SQL.
 
       Whenever you answer from here, say so plainly and show the SQL you ran, so
       the reader can tell an ad hoc query apart from a published mart.
