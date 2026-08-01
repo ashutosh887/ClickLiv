@@ -130,6 +130,42 @@ synchronous MergeTree inserts and the panel that would move first on a live feed
 over the same client that runs the pipeline. ClickHouse is the analytical engine on both
 sides of the integration.
 
+## The serving surface
+
+The benchmark question shapes are private (O2). Rather than guess the exact wording,
+`marts` answers any (dimension filter, time range, grain) combination through one
+parameterized view, called as a table function:
+
+```sh
+make marts
+```
+
+```sql
+SELECT * FROM marts.v_concurrency(
+    grain_minutes = 60, country = '', platform = 'ANDROID_PHONE', video_type = '',
+    content_id = 0, minute_from = 0, minute_to = 4294967295);
+```
+
+An empty string or a zero content_id means "no filter on this dimension", via
+`coalesce(nullIf({param}, ''), column)`. Filtering happens before the aggregation and
+the aggregation is always to `minute`, so D6 holds regardless of which dims are
+supplied: sum across whatever is left unfiltered, then take `max()` or `avg()` over
+minutes, never the reverse. Numbers from `marts.v_concurrency` match Gate A exactly:
+2,692 for the whole day, 1,704 for `platform = ANDROID_PHONE`, 425 for `video_type =
+live`.
+
+`marts` is the only granted surface. `marts_agent` holds a role scoped to `SELECT ON
+marts.*`, nothing on the tables underneath, enforced by `SQL SECURITY DEFINER` on the
+views so the invoker's own grants are never checked against `minute_occupancy`.
+Verified: dropping `DEFINER` makes the same query 403 for `marts_agent` even though
+the view itself is granted, because ClickHouse checks the invoker's rights on the
+underlying table by default.
+
+`marts_agent`'s settings profile carries `readonly = 1 CONST`, so it cannot raise its
+own ceiling; every attempt to touch `max_execution_time`, `max_rows_to_read`, or
+`readonly` itself is rejected before the query runs, not after. A raw scan is not
+merely slow, it does not start.
+
 ## The active rule
 
 A session is active at time `t` when it is playing **and** foregrounded **and**
@@ -238,6 +274,7 @@ sql/02_sessionize.sql        the state machine, as window functions
 sql/03_occupancy.sql         session_minutes and the minute_occupancy rollup
 sql/04_deltas.sql            merged minute runs to signed deltas
 sql/05_oracles.sql           tables the Python reference is loaded into
+sql/06_marts.sql             parameterized views, RBAC, the query budget
 src/clickliv/cli.py          command dispatch, identical for local and Cloud
 src/clickliv/ch.py           zero-dependency ClickHouse HTTP client
 src/clickliv/load.py         CSV ingestion, content before events
@@ -248,7 +285,7 @@ src/clickliv/chdb_engine.py  Gate D, the whole pipeline in-process
 src/clickliv/sweep.py        threshold sensitivity grid
 src/clickliv/otel.py         OTLP exporter, spans carry server-side metrics
 src/clickliv/observe.py      reads the trace back out of ClickStack
-observability/               read-only user for the ClickStack ClickHouse
+docker/                      access-management and ClickStack user overrides
 ```
 
 Thresholds and credentials are `${VAR}` placeholders in the SQL, substituted from the
