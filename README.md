@@ -58,6 +58,7 @@ make all         # schema, load, sessionize, both serving paths, reference, Gate
 make gate-b      # rebuild twice, assert byte-identical serving tables
 make sweep       # threshold sensitivity grid
 make chdb        # same SQL in-process on chDB, no server at all
+make gate-c      # held-out single-day dry run, evidence in answers/gate_c and evidence/gate_c
 ```
 
 `make all` runs CSV to Gate A in about 8 seconds. The same commands run unchanged against
@@ -215,6 +216,47 @@ plan, which is the point, not a coincidence to explain away. `system.query_log.p
 records `['clickliv.minute_occupancy.proj_content_minute']` for the query, so the claim
 is checkable after the fact and not just at EXPLAIN time.
 
+## Gate C, the held-out dry run
+
+The tuning CSV spans 11.8 days, but the real submission is one fresh day (O8). `make
+gate-c` rehearses that drop before it happens: it holds out the busiest calendar day in
+the tuning data (20660, 849,888 of 905,558 events, also the most recent, which is what a
+freshly landed day looks like), reloads the pipeline against that slice alone, and runs
+schema through chDB against it, unmodified:
+
+```
+schema, load, sessionize, occupancy, deltas, reference, verify   Gate A on the slice
+sessionize, occupancy, deltas again                              Gate C: idempotent rebuild
+marts, answers, evidence                                         the full serving layer
+07_projections.sql, evidence                                     the projection, rebuilt
+chDB                                                              Gate D on the slice
+```
+
+Every gate passes on data the pipeline was not specifically run against before:
+
+```
+Gate A: PASS  (12/12 checks)
+Gate C: PASS  rebuild is idempotent on the held-out day
+Gate D: PASS  chDB agrees with the server
+```
+
+Output lands in `answers/gate_c/` and `evidence/gate_c/`, alongside the full-dataset
+answers and evidence rather than overwriting them, so both are checkable at once.
+
+**Gate C caught a real bug the very first time it ran.** `MATERIALIZE PROJECTION` is an
+asynchronous mutation; querying immediately after issuing it can race the projection
+still being built, and forcing it by name then fails with `INCORRECT_DATA` because it
+genuinely is not yet there to use. Every previous run of `make projections` had enough
+wall-clock gap between separate commands to never hit this. Fixed with
+`SETTINGS mutations_sync = 2` on the `MATERIALIZE PROJECTION` statement in
+`sql/07_projections.sql`, so the ALTER blocks until the projection is actually built.
+This is what Gate C is for: whatever breaks on a full, uninterrupted, unfamiliar-data
+run is what would have broken on the real unseen-day drop, not a rehearsal problem.
+
+After the dry run, `make gate-c` reloads the full dataset and re-verifies Gate A, so the
+live database and the committed `answers/`/`evidence/` are left describing the full
+tuning data, not the held-out slice, whether or not the dry run passed.
+
 ## The active rule
 
 A session is active at time `t` when it is playing **and** foregrounded **and**
@@ -327,6 +369,7 @@ sql/06_marts.sql             parameterized views, RBAC, the query budget
 src/clickliv/answers.py      benchmark answers, latencies and evidence, no hand-typing
 sql/07_projections.sql       proj_content_minute, reordered by (content_id, minute)
 src/clickliv/projections.py  before/after/forced EXPLAIN, query_log confirmation
+src/clickliv/gate_c.py       Gate C, the held-out single-day dry run
 src/clickliv/cli.py          command dispatch, identical for local and Cloud
 src/clickliv/ch.py           zero-dependency ClickHouse HTTP client
 src/clickliv/load.py         CSV ingestion, content before events
