@@ -63,14 +63,9 @@
     background: linear-gradient(transparent 58%, var(--yellow) 58%); padding: 0 2px;
   }
   .live {
-    display: inline-flex; align-items: center; gap: 6px; font-size: 11px;
+    display: inline-flex; align-items: center; font-size: 11px;
     letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink);
   }
-  .live::before {
-    content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--yellow);
-    border: 1px solid #d8dd3f;
-  }
-  .live.stale::before { background: var(--soft); border-color: var(--line); }
 
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px; margin: 26px 0 0; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .stat { background: var(--bg); padding: 15px 17px; }
@@ -161,6 +156,8 @@
     letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
     border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; background: var(--bg); }
   .card h3 { padding-right: 96px; }
+  section, .hero { scroll-margin-top: 72px; }
+  h2, h3 { scroll-margin-top: 72px; }
 </style>
 </head>
 <body>
