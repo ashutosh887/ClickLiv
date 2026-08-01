@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A superseded run tells you nothing, so cancel it and keep the badge current.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The stdlib unittest suite. No ClickHouse, no network, no secrets.
+  tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Run unit tests
+        run: make test
+
+  # The real SQL, end to end, on the committed fixture. chDB runs ClickHouse
+  # in-process, so there is no server to start and nothing to authenticate to.
+  pipeline:
+    name: Pipeline on chDB
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # Without chDB the pipeline tests would skip and the job would go green
+      # for the wrong reason. Fail here instead.
+      - name: chDB is installed
+        run: uv run --extra embedded python -c "import chdb; print(chdb.__version__)"
+      - name: Run the pipeline against the fixture
+        run: make fixture-pipeline
