@@ -2,10 +2,6 @@
 
 Real-time foreground-only concurrency for SonyLIV streaming telemetry, on ClickHouse.
 
-[![CI](https://img.shields.io/github/actions/workflow/status/ashutosh887/ClickLiv/ci.yml?branch=main&label=CI)](https://github.com/ashutosh887/ClickLiv/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![ClickHouse](https://img.shields.io/badge/ClickHouse-26.7-FFCC01.svg)](https://clickhouse.com)
-
 A viewer counts as concurrent only while they are **playing**, **foregrounded**, and
 **heartbeat-fresh**. Counting every open session instead overstates peak concurrency by
 **39%** and average concurrency by **49%** on the provided dataset, and it puts the peak
