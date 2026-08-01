@@ -307,8 +307,13 @@ Charts render from the saved query, so a failing tile is almost always the query
 the tile's three dot menu, click the pencil next to the query, and run it in the inline
 editor.
 
-`UNKNOWN_TABLE` means a table reference lost its `clickliv.` or `marts.` prefix. That is
-the failure this page is qualified against, so copy the query again from here.
+`UNKNOWN_TABLE` means one of two things. Either a table reference lost its `clickliv.`
+or `marts.` prefix, which is the failure this page is qualified against, so copy the
+query again from here. Or the pipeline is being rebuilt underneath you, because the
+rebuild drops and recreates the tables and every tile errors for the few seconds that
+window is open. This was hit live while writing this page. Wait, refresh, and if the
+tables are back the tiles come back with them. Confirm with `./scripts/verify_dashboard.sh`
+rather than by guessing which of the two it was.
 
 `serving_latency` returning zero rows means the query log rotated. Any other query
 returning zero rows means the pipeline needs a rebuild, in which case see
