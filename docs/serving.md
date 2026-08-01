@@ -62,7 +62,16 @@ forced, force_optimize_projection_name           same plan, same 6/16
 The planner picks the projection on its own; forcing it by name lands on the identical
 plan, which is the point, not a coincidence to explain away. `system.query_log.projections`
 records `['clickliv.minute_occupancy.proj_content_minute']` for the query, so the claim
-is checkable after the fact and not just at EXPLAIN time.
+is checkable after the fact and not just at EXPLAIN time. Read rows for that query fall
+from 96,792 to 15,245.
+
+**The projection is persistent, not a demo artifact.** It lives on the Cloud service
+between runs and `SELECT * FROM system.projections` lists it, so "show me the projection
+working" is answerable without running anything first. The one thing that removes it is a
+rebuild: `sql/03_occupancy.sql` drops and recreates `minute_occupancy`, which takes the
+projection with it, so `projections` runs after `occupancy` in every pipeline that
+rebuilds the table. If `system.projections` is ever empty, that is the reason, and
+`make projections` puts it back.
 
 ## Update handling, proven live
 
@@ -82,8 +91,13 @@ session that is genuinely open at data end, insert one synthetic heartbeat, read
 live state (no rebuild), then run the full batch sessionizer from scratch and
 compare. Measured: the two agree to the millisecond. `evidence/incremental_update.txt`.
 
-Both objects are dropped after the run, same leave-no-trace discipline as Gate C, so
-this does not become a permanent tax on every other command's inserts.
+**Both objects are deliberately ephemeral.** `open_session_state` and
+`mv_extend_open_session` are created by the run and dropped by it again, on the failure
+path as well as the success path, same leave-no-trace discipline as Gate C. Expect to
+find neither of them on the Cloud service: a materialized view on `raw_events` is a tax
+on every subsequent insert, and this one exists to prove a property, not to serve
+traffic. `make incremental` recreates them, proves the property, and removes them, and
+`evidence/incremental_update.txt` is what survives.
 
 ## The dashboard
 
