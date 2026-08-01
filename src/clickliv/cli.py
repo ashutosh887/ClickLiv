@@ -182,6 +182,12 @@ def step_projections(ch: ClickHouse) -> int:
     return 0 if projections.run(ch, Path("evidence")) else 1
 
 
+def step_scale(ch: ClickHouse) -> int:
+    from . import scale
+    Path("evidence").mkdir(exist_ok=True)
+    return 0 if scale.run(ch, artifacts_dir() / "scale", Path("evidence")) else 1
+
+
 def step_ui(ch: ClickHouse) -> int:
     from . import ui
     ui.run(ch)
@@ -225,6 +231,7 @@ STEPS = {
     "marts": step_marts,
     "answers": step_answers,
     "projections": step_projections,
+    "scale": step_scale,
     "ui": step_ui,
     "obs": step_obs,
     "reset": step_reset,

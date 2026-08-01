@@ -59,6 +59,7 @@ make gate-b      # rebuild twice, assert byte-identical serving tables
 make sweep       # threshold sensitivity grid
 make chdb        # same SQL in-process on chDB, no server at all
 make gate-c      # held-out single-day dry run, evidence in answers/gate_c and evidence/gate_c
+make scale       # O7: sharding and read-cost proofs at 1x/10x/100x, evidence/scale.txt
 ```
 
 `make all` runs CSV to Gate A in about 8 seconds. The same commands run unchanged against
@@ -265,6 +266,38 @@ After the dry run, `make gate-c` reloads the full dataset and re-verifies Gate A
 live database and the committed `answers/`/`evidence/` are left describing the full
 tuning data, not the held-out slice, whether or not the dry run passed.
 
+## O7, scale beyond the real peak
+
+Real peak concurrency here is 2,692, not the worked example's 300K, so judges will ask
+how the design behaves at 100x. `make scale` answers with two measured proofs instead of
+an assertion, written to `evidence/scale.txt`:
+
+**Sharding is exact, not approximate.** Sessionization never lets a session cross a
+shard boundary, so splitting `active_intervals` across 8 independent chDB instances by
+`cityHash64(video_session_id) % 8`, computing each shard's per-minute session count
+alone, and summing the 8 results reproduces the live server's `minute_occupancy` peak
+and its full 3,649-minute series exactly. No session is ever double-counted or missed,
+by construction, which is why this fans out on any number of workers with no
+coordination between them.
+
+**The serving layer's read cost tracks the rollup, not the raw event count.** At 1x,
+10x and 100x the real data (built by exact duplication, shifted session ids and time),
+`system.query_log` shows the rollup reading a constant 7.4x fewer rows than a naive scan
+of the raw events at every scale:
+
+```
+ scale    raw_rows  serving_rows  naive_read_rows  rollup_read_rows    ratio
+    1x     905,558       121,954          905,558           121,954      7.4
+   10x   9,055,580     1,219,481        9,055,580         1,219,481      7.4
+  100x  90,555,800    12,194,810       90,555,800        12,194,810      7.4
+```
+
+That flat ratio is a property of exact duplication (both tables scale by the same K),
+stated rather than hidden. What it does show honestly: the collapse from event grain to
+session-minute grain is structural and does not erode as the table grows; under organic
+growth, where sessions gain more events rather than being cloned wholesale, the serving
+table grows slower than raw events and this ratio would widen further.
+
 ## The active rule
 
 A session is active at time `t` when it is playing **and** foregrounded **and**
@@ -378,6 +411,7 @@ src/clickliv/answers.py      benchmark answers, latencies and evidence, no hand-
 sql/07_projections.sql       proj_content_minute, reordered by (content_id, minute)
 src/clickliv/projections.py  before/after/forced EXPLAIN, query_log confirmation
 src/clickliv/gate_c.py       Gate C, the held-out single-day dry run
+src/clickliv/scale.py        O7, the sharding and read-cost proofs at scale
 src/clickliv/ui.py           the minimal concurrency dashboard
 src/clickliv/cli.py          command dispatch, identical for local and Cloud
 src/clickliv/ch.py           zero-dependency ClickHouse HTTP client
