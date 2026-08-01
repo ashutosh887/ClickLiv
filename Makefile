@@ -136,7 +136,7 @@ unseen-fixture:
 
 # The same fresh day in every container and CSV quirk the organizers might ship.
 unseen-variants:
-	uv run --quiet python tools/make_unseen_fixture.py --variants $(if $(DIR),$(DIR),fixtures/variants)
+	uv run --quiet python tools/make_unseen_fixture.py --variants $(if $(DIR),$(DIR),/tmp/clickliv-variants)
 
 mcp:
 	$(CLI) mcp

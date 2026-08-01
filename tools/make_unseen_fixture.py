@@ -302,7 +302,7 @@ def main() -> int:
 
     if "--variants" in sys.argv:
         index = sys.argv.index("--variants") + 1
-        directory = Path(sys.argv[index]) if index < len(sys.argv) else ROOT / "fixtures/variants"
+        directory = Path(sys.argv[index]) if index < len(sys.argv) else Path("/tmp/clickliv-variants")
         print()
         for path in variants(directory, rows):
             print(f"{str(path):<52}{path.stat().st_size:>10,} bytes")
