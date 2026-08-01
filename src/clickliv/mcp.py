@@ -524,7 +524,7 @@ def handler_for(ch: ClickHouse):
     return Handler
 
 
-def serve(ch: ClickHouse, host: str = "127.0.0.1", port: int = 8765) -> None:
+def serve(ch: ClickHouse, host: str = "0.0.0.0", port: int = 8765) -> None:
     server = ThreadingHTTPServer((host, port), handler_for(ch))
     print(f"clickliv mcp at http://{host}:{port}{ENDPOINT} as {AGENT_USER}")
     print(f"tools: {', '.join(tool['name'] for tool in TOOLS)}")

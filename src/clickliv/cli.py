@@ -365,7 +365,8 @@ def step_unseen(ch: ClickHouse) -> int:
 
 def step_mcp(ch: ClickHouse) -> int:
     from . import mcp
-    mcp.serve(ch, port=int(os.environ.get("MCP_PORT", "8765")))
+    mcp.serve(ch, host=os.environ.get("MCP_HOST", "0.0.0.0"),
+              port=int(os.environ.get("MCP_PORT", "8765")))
     return 0
 
 
