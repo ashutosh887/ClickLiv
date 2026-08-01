@@ -13,14 +13,20 @@ peak in the wrong minute entirely.
 | Minute the peak lands in, UTC | **2026-07-26 10:56** | 2026-07-26 10:59 |
 | Average concurrent viewers | **24.2** | 49.0% higher |
 
-Reproduce all three rows from a clean clone in two commands:
+Reproduce all three rows from a clean clone in three commands:
 
 ```sh
 cp .env.example .env
+make data
 make up && make all
 ```
 
-`make up` starts ClickHouse 26.7 in Docker, or point `.env` at ClickHouse Cloud instead.
+`make data` fetches the two source CSVs. They are not in the repository, because `data/`
+is gitignored, so a clone without this step fails at load.
+
+`make up` starts ClickHouse in Docker, or point `.env` at ClickHouse Cloud instead. Note
+that the Cloud service this project runs against is 26.4, so `EXPLAIN ANALYZE`, which
+needs 26.7, is unavailable there and the code records that rather than failing.
 `make all` runs CSV to Gate A in about eight seconds and prints twelve cross-path checks.
 `make chdb` reproduces the same numbers in-process with chDB, no server and no Docker at
 all.
@@ -475,6 +481,7 @@ against ClickHouse Cloud. Everything it composes is also a target on its own.
 | `make marts` | The parameterized serving view, the role and the query budget |
 | `make answers` | The benchmark answer set through `marts`, plus latencies and EXPLAIN |
 | `make submission` | CSV, JSON, and a manifest with versions, row counts, git commit, thresholds and a SHA-256 per file |
+| `make claims` | Reads every published figure live and names any document still stating a superseded one |
 | `make projections` | Builds `proj_content_minute` and proves the planner chooses it |
 | `make scale` | 8-shard exactness and read cost at 1x, 10x, 100x |
 | `make userlevel` | User-level concurrency, exact against HyperLogLog |

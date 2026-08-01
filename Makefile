@@ -3,7 +3,7 @@ CLI := uv run --quiet python -m clickliv
 .PHONY: up down logs obs obs-up obs-down obs-logs ping schema load reconcile \
         sessionize occupancy deltas reference verify pipeline all gate-b gate-c \
         sweep chdb marts answers projections scale ui userlevel crossover decline \
-        incremental instantaneous submission replay unseen unseen-fixture unseen-variants \
+        incremental instantaneous submission claims replay unseen unseen-fixture unseen-variants \
         preflight rollback mcp test data fixture fixture-pipeline reset \
         llm-up llm-down llm-logs chat-up chat-down chat-logs
 

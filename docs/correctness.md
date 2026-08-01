@@ -132,7 +132,7 @@ exceed occupancy, and Gate A asserts that.
 
 ## Tests
 
-`make test`, 38 tests, `python -m unittest discover -s tests`, zero new dependencies.
+`make test`, 78 tests, `python -m unittest discover -s tests`, zero new dependencies.
 Covers the pure, deterministic logic that the four correctness gates never happen to
 exercise on their own: SQL statement splitting, credential redaction, JSONCompact
 parsing, config construction, the Gate B fingerprint comparison, Gate C's day-splitting
