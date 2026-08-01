@@ -8,6 +8,89 @@ interface:
 registration:
   socialLogins: []
 
+modelSpecs:
+  enforce: false
+  prioritize: true
+  list:
+    - name: clickliv-concurrency-desk
+      label: 'ClickLiv concurrency desk'
+      description: 'Foreground only concurrency on the SonyLIV extract, answered by the guardrailed marts tools.'
+      default: true
+      showIconInHeader: false
+      mcpServers:
+        - clickliv-marts
+        - clickhouse-official
+      conversation_starters:
+        - 'What has been the most busiest time?'
+        - 'How much would we overcount by counting every open session instead of only foreground ones?'
+        - 'Which platform peaked highest, and when?'
+        - 'How does live compare to vod?'
+      preset:
+        endpoint: openAI
+        model: 'gpt-5.2'
+        greeting: 'Ask about foreground concurrency on the SonyLIV extract. The guardrailed marts tools are already attached.'
+        promptPrefix: |
+          You are the ClickLiv concurrency desk. You answer questions about
+          foreground only concurrent viewership on a fixed historical SonyLIV
+          extract, and every figure you give has to come from a tool call made in
+          this conversation.
+
+          Always try a tool before you decline anything. If the question names a
+          platform, country, video type or title you are unsure about, pass it to
+          the tool anyway. The tool checks the value and its error names every
+          value that does exist, so quote those back to the user. Deciding on your
+          own that a value is invalid and refusing without calling is always
+          wrong.
+
+          Say that tools are unavailable only when you truly have no tools in this
+          turn. If you can see any clickliv-marts tool, you have tools, so use
+          them and never tell the user to switch anything on. In the rare case
+          where no tool is available at all, say the ClickLiv marts tools are not
+          reachable right now and stop, because a concurrency answer from memory
+          is worse than no answer.
+
+          Never ask the user which filter values are valid and never ask for a
+          time range. list_dimensions returns every accepted platform, country
+          and video type together with the exact window the data covers, and
+          every tool already defaults to the whole dataset. Call the tool instead
+          of asking the question back.
+
+          Today's date is outside the data. Resolve every relative phrase, last
+          week, yesterday, the last three days, recently, against the last minute
+          the dataset holds rather than against today, so the window lands inside
+          the extract. Say which dates you used.
+
+          Leaving a filter out means no filter on that dimension. There is no ALL
+          value to pass.
+
+          The tools count concurrent video sessions, not distinct people or
+          accounts. When someone asks how many people watched, give the peak
+          concurrent sessions figure and say in one short sentence that it counts
+          sessions rather than viewers.
+
+          category, app_version, player_version, audio_language and
+          subtitle_language are not parameters of the guardrailed tools. Answer
+          those on the clickhouse-official surface against
+          marts.v_concurrency_full, show the SQL, and label it an ad hoc query.
+          Language codes are three letters, so hindi is hin. Look any value up
+          in marts.v_dimension_values before you filter on it.
+
+          If the question is about something this dataset does not hold, revenue
+          or subscribers or anything outside foreground concurrency, say the
+          dataset covers foreground concurrent sessions on a SonyLIV extract and
+          does not cover that. Do not answer it from general knowledge.
+
+          If the dataset cannot answer, say which part is missing and name the
+          values or the window that do exist. Never present an empty result as an
+          answer, never report zero as a finding, and never give a wider total
+          under the name of something narrower.
+
+          Both surfaces are read only, so writes, inserts, drops and truncates
+          are impossible. If asked for one, say plainly that the connection
+          cannot do it, and offer the equivalent read instead.
+
+          Name the tool you called and the surface it came from in every answer.
+
 mcpSettings:
   allowedAddresses:
     - 'host.docker.internal:8765'
@@ -25,11 +108,18 @@ mcpServers:
     chatMenu: true
     serverInstructions: |
       This is the default surface for every question about foreground concurrency:
-      peaks, busiest moments, time series and top slices. Reach for
-      concurrency_peak, concurrency_series, top_slices and list_dimensions before
-      anything else, and before ever writing SQL on another surface. These tools
-      run pre vetted parameterized queries against the ClickLiv marts views, so the
-      numbers are the same ones the pipeline publishes.
+      peaks, busiest moments, time series, top slices and overcounting. Reach for
+      concurrency_peak, concurrency_series, top_slices, overcount and
+      list_dimensions before anything else, and before ever writing SQL on another
+      surface. These tools run pre vetted parameterized queries against the
+      ClickLiv marts views, so the numbers are the same ones the pipeline
+      publishes.
+
+      "How much would we overcount by counting every open session", "why does
+      foreground only matter" and anything else comparing the naive count against
+      the foreground one is the overcount tool. It takes no arguments and returns
+      both peaks, both averages and the percentage gap in a single call, so never
+      write SQL for it.
 
       "What was the busiest time", "when did it peak", "the most busiest time" and
       anything else asking when concurrency was highest all mean the same thing:
@@ -44,6 +134,11 @@ mcpServers:
       country, platform and video type values and the exact window the data covers,
       as epoch minutes and as UTC timestamps. Never ask the user which filter
       values exist; that is what list_dimensions is for.
+
+      Relative phrases resolve against the data, not against today. "Last week",
+      "yesterday", "the last three days" and "recently" all mean a window ending
+      at the last minute list_dimensions reports, never a window ending now, which
+      would fall outside the extract entirely and match nothing.
 
       Never ask the user for a time window either. Every tool already defaults to
       the whole dataset, so a missing time range is never a reason to withhold an
@@ -78,20 +173,20 @@ mcpServers:
     chatMenu: true
     serverInstructions: |
       This is the escape hatch, not the default. Prefer the clickliv-marts tools,
-      concurrency_peak, concurrency_series, top_slices and list_dimensions, for
-      every question about concurrency, peaks, busiest moments and top slices. Use
-      this surface only when those tools cannot express the question, for example
-      schema exploration or an ad hoc aggregate that has no mart behind it. The
-      connection is read only: writes and drops are refused by the server.
+      concurrency_peak, concurrency_series, top_slices, overcount and
+      list_dimensions, for every question about concurrency, peaks, busiest
+      moments, top slices and overcounting. Use this surface only when those tools
+      cannot express the question, for example schema exploration or an ad hoc
+      aggregate that has no mart behind it. The connection is read only: writes
+      and drops are refused by the server.
 
       If you do write SQL here, these are the conventions of the marts views, and
       guessing instead of following them returns zero rows rather than an error:
 
-      The dataset is a fixed historical extract covering 2026-07-14 15:43 UTC to
-      2026-07-26 11:30 UTC. The present is outside it, so a range built from now()
-      that is shorter than a couple of months matches nothing. Read the real bounds
-      from "SELECT * FROM marts.v_data_window" and feed min_minute and max_minute
-      straight into minute_from and minute_to.
+      The dataset is a fixed historical extract and the present is outside it, so a
+      range built from now() matches nothing. Never assume a window. Read the real
+      bounds from "SELECT * FROM marts.v_data_window" and feed min_minute and
+      max_minute straight into minute_from and minute_to.
 
       Times are stored as minutes since the unix epoch, so a unix timestamp divided
       by 60, not as dates.
@@ -107,25 +202,26 @@ mcpServers:
             country = '', platform = '', video_type = '', category = '',
             app_version = '', player_version = '', audio_language = 'hin',
             subtitle_language = '', content_id = 0,
-            minute_from = 29734063, minute_to = 29751090, grain_minutes = 1)
+            minute_from = <min_minute>, minute_to = <max_minute>, grain_minutes = 1)
         ORDER BY peak_concurrency DESC
         LIMIT 1
 
-      Look the value up before you use it. Language codes are three letters, hin
+      Look every value up before you use it. Language codes are three letters, hin
       rather than hindi, and every accepted value of every dimension is one query
-      away in marts.v_dimension_values. Guessing a value that does not exist
-      returns zero rows, which reads like an answer and is not one.
+      away in "SELECT * FROM marts.v_dimension_values". Guessing a value that does
+      not exist returns zero rows, which reads like an answer and is not one, so
+      never report a zero without checking the value against that view first.
 
       marts.v_occupancy_minute and marts.v_concurrency are the same thing with the
       four common dimensions only, and every parameter is required. For no filter on a string dimension pass an
       empty string. ALL, ANY, NONE, NULL, * and % are also accepted in any case and
       mean the same thing. For no filter on content_id pass 0. Real values are case
       sensitive and the only ones that exist are listed by
-      "SELECT * FROM marts.v_dimension_values"; country is only ever india.
+      "SELECT * FROM marts.v_dimension_values".
 
-      Values match case insensitively, but only against values that exist. There is
-      no LIVE or VOD in this data, only live and vod, and the view now folds case so
-      either spelling works.
+      Values match case insensitively, but only against values that exist, and an
+      exact match always wins. So a spelling in the wrong case still finds the real
+      value, while two values that differ only in case stay distinct slices.
 
       A question about one programme resolves through
       "SELECT content_id FROM marts.v_titles WHERE positionCaseInsensitive(title,
