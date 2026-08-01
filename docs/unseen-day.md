@@ -58,8 +58,16 @@ loading at all. If the file has extra columns or a non comma delimiter the first
 lines say so explicitly. If a required column is absent the run stops immediately and
 prints the header it actually found.
 
-**sessionize, occupancy, deltas.** Row counts. `active_intervals` at zero means the
-event vocabulary did not match; see the troubleshooting table below.
+**sessionize, occupancy, deltas.** Row counts, and a vocabulary check that aborts the
+run rather than letting it produce zeros. If no session is ever active, or fewer than
+half of them are, the stage stops and prints every `event_type` and `event` value the
+file actually contains with its row count, marks which ones the sessionizer recognises,
+and lists the recognised tokens that are absent. A rename reads straight off that table:
+`PlaybackStart 25 no` sitting next to `recognised event_type values absent from this
+file: VideoPlay` is the whole diagnosis. The half is a heuristic bound, chosen well
+below the 99.97% of sessions that are active in the tuning data and the 99.95% in its
+busiest single day. Passing it means the vocabulary was recognised, not that the answers
+are right. Gate A is what checks the answers.
 
 **verify.** Gate A, twelve checks, all PASS. This is the important one: it diffs the
 ClickHouse result against an independent pure Python recomputation of the same day,
@@ -122,7 +130,8 @@ and for the content file: `content_id  title  video_type  category`.
 | --- | --- | --- |
 | `is missing required column(s)` | header mismatch | `CSV_RENAME`, see above |
 | `join_orphans` non zero | the content file does not cover every `content_id` in the events | reload with the right content file; the events load is refused rather than silently unlabelled |
-| `active_intervals 0 rows` | no event matched the play or foreground vocabulary | check the distinct `event_type` and `event` values in the new file against `sql/02_sessionize.sql` |
+| `FAIL sessionize produced 0 active interval(s)` | an event token was renamed, so nothing ever counts as playing | read the table the failure prints. Add the new token to the `multiIf` in `sql/02_sessionize.sql` and to `classify()` in `src/clickliv/reference.py`, keeping the two identical, then re run. Both sides of Gate A have to agree, so changing only one is worse than changing neither. |
+| `FAIL ... N of M sessions (x%) are ever active` | some but not all of the vocabulary was renamed | same fix, same table |
 | `minute_occupancy is empty` | nothing became active | same as above |
 | Gate A FAIL | ClickHouse and the Python reference disagree | do not ship the answers. The failing check names which side has the extra rows. |
 | A timeout or a wake up error against Cloud | the service was idle | run `make ping` once, then re run |

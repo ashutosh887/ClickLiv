@@ -15,6 +15,12 @@ PAUSE = frozenset({"pause", "speed-pause", "AdPause"})
 RESUME = frozenset({"resume", "speed-resume", "AdResume"})
 STOP_TYPES = frozenset({"VideoError", "VideoSessionEnd"})
 
+VOCABULARY = {
+    "event_type": ("VideoSessionStart", "VideoPlay", "AppBackgrounded",
+                   "AppForegrounded", *sorted(STOP_TYPES)),
+    "event": tuple(sorted(PAUSE | RESUME)),
+}
+
 DIM_NAMES = (
     "platform", "app_version", "country", "audio_language",
     "subtitle_language", "player_version", "content_id",

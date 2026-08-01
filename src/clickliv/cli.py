@@ -107,10 +107,63 @@ def step_load(ch: ClickHouse) -> int:
     return 0 if loader.reconcile(ch) else 1
 
 
+MIN_ACTIVE_SESSION_RATIO = 0.5
+
+SESSIONIZE_SHAPE = """
+    SELECT
+        (SELECT count() FROM raw_events)                        AS events,
+        (SELECT uniqExact(video_session_id) FROM raw_events)    AS sessions,
+        (SELECT count() FROM active_intervals)                  AS intervals,
+        (SELECT uniqExact(video_session_id) FROM active_intervals) AS active_sessions
+"""
+
+
+def vocabulary_report(ch: ClickHouse) -> str:
+    """What the file actually contains beside what the sessionizer looks for, so a
+    renamed token is readable straight off the error."""
+    from .reference import VOCABULARY
+
+    lines = []
+    for column, expected in VOCABULARY.items():
+        rows = ch.query(f"SELECT {column}, count() AS n FROM raw_events "
+                        f"GROUP BY {column} ORDER BY n DESC LIMIT 25").rows
+        width = max([len(str(v)) for v, _ in rows] + [len(column)])
+        lines.append(f"\n{column + ' in raw_events':<{width + 16}}{'rows':>12}  recognised")
+        for value, n in rows:
+            lines.append(f"{str(value):<{width + 16}}{int(n):>12,}  "
+                         f"{'yes' if value in expected else 'no'}")
+        absent = [v for v in expected if v not in {r[0] for r in rows}]
+        lines.append(f"\nrecognised {column} values absent from this file: "
+                     + (", ".join(absent) if absent else "none, the vocabulary matches"))
+    return "\n".join(lines)
+
+
 def step_sessionize(ch: ClickHouse) -> int:
     run_sql_file(ch, "02_sessionize.sql")
     counts(ch, "active_intervals")
-    return 0
+
+    shape = ch.query(SESSIONIZE_SHAPE).dicts()[0]
+    sessions = int(shape["sessions"])
+    active = int(shape["active_sessions"])
+    ratio = active / sessions if sessions else 0.0
+    if int(shape["intervals"]) and ratio >= MIN_ACTIVE_SESSION_RATIO:
+        return 0
+
+    print(f"\nFAIL  sessionize produced {int(shape['intervals']):,} active interval(s) "
+          f"from {int(shape['events']):,} events in {sessions:,} sessions")
+    print(f"      {active:,} of {sessions:,} sessions ({ratio:.1%}) are ever active. "
+          f"The tuning data measures 99.97% and its busiest single day 99.95%, so this "
+          f"run trips below {MIN_ACTIVE_SESSION_RATIO:.0%}.")
+    print("      That bound is a heuristic, not a proof: passing it means the event "
+          "vocabulary was recognised, not that the answers are right. Gate A is what "
+          "checks the answers.")
+    print("      The usual cause is a renamed event token, which makes every answer "
+          "zero without anything else complaining.")
+    print(vocabulary_report(ch))
+    print("\n      Fix the vocabulary in sql/02_sessionize.sql and the matching "
+          "classify() in src/clickliv/reference.py, or map the tokens upstream. "
+          "See docs/unseen-day.md.")
+    return 1
 
 
 def step_occupancy(ch: ClickHouse) -> int:
