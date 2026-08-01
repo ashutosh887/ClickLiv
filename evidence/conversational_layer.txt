@@ -172,3 +172,187 @@ Q: what is the peak concurrency for hindi audio?
 
 In the UI the MCP tool picker must have clickliv-marts turned on for the
 guardrailed surface to answer; it is off by default per message.
+
+================================================================
+2026-08-02, third pass: the tool picker closed server side, and
+twenty two sloppy questions driven through the live EC2 LibreChat
+================================================================
+
+-- the picker landmine, reproduced then closed
+
+before: a fresh conversation with no MCP server selected, asked
+"What has been the most busiest time?", answered from world
+knowledge and asked which shop, city or airport was meant. No tool
+call at all. conversation dee3197e-77dc-4bcd-83e0-44d90b8a209d
+
+after: docker/librechat.yaml declares modelSpecs entry
+clickliv-concurrency-desk, default: true, prioritize: true, listing
+both MCP servers under mcpServers. LibreChat unions a spec's
+mcpServers with the picker in the ephemeral agent builder, server
+side, so the tools cannot be switched off by accident.
+
+  request with spec set and ephemeralAgent.mcp explicitly []
+  -> concurrency_peak_mcp_clickliv-marts {} -> 2,692
+
+proven in a real browser, not just over the API: fresh login,
+/c/new, nothing touched, one question typed. The client sent
+  spec: clickliv-concurrency-desk
+  ephemeralAgent.mcp: ["clickliv-marts","clickhouse-official"]
+the picker read "2 selected", and the reply was 2,692 at
+2026-07-26 10:56 UTC from concurrency_peak.
+
+residual gap: a conversation created before the spec existed stores
+no spec, so it gets neither the pinned tools nor the prompt. Start a
+new chat.
+
+-- the failsafe prompt made things worse before it made them better
+
+first draft said "if no tools are attached, say so and tell the user
+to switch clickliv-marts back on". gpt-5.2 reached for that line
+whenever it merely did not want to answer, and told the user to
+switch the tools on in four conversations where the tools were
+demonstrably attached: Roku, "how many people watched", hindi audio,
+and the revenue question. Rewritten so the rule fires only on truly
+having no tools, with a positive instruction to attempt a tool call
+before declining anything. All four then answered correctly.
+
+-- twenty two questions, live, after the fixes
+
+Q: What has been the most busiest time?
+   tools: concurrency_peak {}
+   answer: The busiest moment in the extract was **2026-07-26 10:56 UTC**, with a **peak foreground concurrency of 2,692 concurrent sessions**. Source: **ClickLiv marts (guardrailed)** — tool **`concurrency_peak`**. Note: this counts **concurrent video sessions in the foreground**, not distinct people/accounts.
+   conversation 01e87c7f-4d07-4e05-b057-d19fa11eeb98
+
+Q: peak concurrency
+   tools: concurrency_peak {}
+   answer: **Peak foreground concurrency (overall): 2,692 concurrent sessions** at **2026-07-26 10:56 UTC** (minute bucket starting then). This comes from the guardrailed **ClickLiv marts** surface via **`concurrency_peak`**. Note: this is **concurrent foreground video sessions**, not distinct people/accounts.
+   conversation 64e93d49-6ddf-4019-a93d-cf229c260913
+
+Q: what is the peak for country ALL?
+   tools: concurrency_peak {}
+   answer: **Peak concurrency for country = ALL (i.e., no country filter applied): 2,692** foreground concurrent sessions. - **When:** 2026-07-26 10:56 UTC (minute bucket) - **Source:** ClickLiv marts (guardrailed) — `concurrency_peak` tool (`functions.concurrency_peak_mcp_clickliv-marts`) - Note: this is **peak concurrent foreground video sessions**, not distinct people/accounts.
+   conversation 420b71ed-e9b5-452e-9725-cb991529ac38
+
+Q: peak for platform all please
+   tools: concurrency_peak {}
+   answer: **Peak foreground concurrency (all platforms, no filters): 2,692 concurrent sessions** at **2026-07-26 10:56 UTC**. This is **concurrent foreground video sessions** (not distinct people/accounts). Source: **ClickLiv marts (guardrailed)** — tool **`concurrency_peak_mcp_clickliv-marts`** (no filters).
+   conversation c39d6adf-b1f6-4f85-b417-94624ff04dc7
+
+Q: show me the peak with platform *
+   tools: top_slices {"dimension":"platform"}
+   answer: Peak foreground concurrency by **platform** (ranked), from the **ClickLiv marts** surface using **`top_slices_mcp_clickliv-marts`**. These are **peak concurrent sessions** (sessions, not distinct people), each platform summed across other dimensions before taking its max. | Platform | Peak concurrent sessions | Peak time (UTC) | |---|---:|---| | ANDROID_PHONE | 1704 | 2026-07-26 10:56 | | IPHONE | 329 | 2026-07-26 10:55 | | SONY_ANDROID_TV | 279 | 2026-07- ...
+   conversation b32df6af-0cd1-4124-bbf3-9f33f20cb6dd
+
+Q: peak for any platform
+   tools: concurrency_peak {}
+   answer: Peak foreground concurrency (all platforms, no filters) was **2,692 concurrent sessions** at **2026-07-26 10:56 UTC**. This is **concurrent foreground video sessions** (not distinct people/accounts). Source: **ClickLiv marts (guardrailed)** — tool **`concurrency_peak`**.
+   conversation 2dc630fa-f538-481b-810a-39e9169eae50
+
+Q: how many were watching on iphone at the busiest point
+   tools: concurrency_peak {"platform":"IPHONE"}
+   answer: **iPhone busiest point (foreground concurrent sessions): 329** at **2026-07-26 10:55 UTC**. Source: **ClickLiv marts (guardrailed)** — tool **`concurrency_peak`** with `platform=IPHONE`. Note: this counts **concurrent foreground video sessions**, not distinct people/accounts.
+   conversation a9e57e8b-ab60-41e1-89cd-8df5b1bb8ed7
+
+Q: what about video type LIVE vs VOD?
+   tools: top_slices {"dimension":"video_type"}
+   answer: LIVE vs VOD on this SonyLIV extract (foreground concurrent sessions): - **VOD**: peak **2,222** concurrent sessions at **2026-07-26 11:02 UTC** - **LIVE**: peak **425** concurrent sessions at **2026-07-26 10:42 UTC** Source: **ClickLiv marts (guardrailed) — `top_slices` tool**. Note: these are **concurrent sessions**, not distinct people/accounts.
+   conversation 7f5b449e-ce54-43bf-a532-a0568d0f6b7a
+
+Q: whats the peak concurrency on Roku?
+   tools: list_dimensions {}
+   answer: Roku isn’t present as a platform in this SonyLIV foreground-concurrency extract, so I can’t produce a “Roku peak concurrency” from it. From **ClickLiv marts (guardrailed) → `list_dimensions` tool**, the only platform values available are: `ANDROID_PHONE, IPHONE, ANDROID_TAB, SONY_ANDROID_TV, LG_HTML_TV, FIRE_TV, JIO_ANDROID_TV, Mweb, SAMSUNG_HTML_TV, XIAOMI_ANDROID_TV` Data window covered: **2026-07-14 15:43 UTC to 2026-07-26 11:30 UTC**. If you meant one  ...
+   conversation 7efd6298-e34e-4af2-b367-432716ecc691
+
+Q: how many people watched coheh heh at its peak?
+   tools: concurrency_peak {"title":"coheh heh"}
+   answer: At its peak, **“coheh heh”** had **8 concurrent foreground sessions** (i.e., peak “people watching” in this dataset) at **2026-07-26 10:47 UTC**. This is **concurrent video sessions in the foreground**, not distinct people/accounts. Source: **ClickLiv marts (guardrailed)** — tool **`concurrency_peak`** (title match: *coheh heh*, content_id **2078158291**).
+   conversation 2ff9c752-1845-4696-aaae-31c47134b6fb
+
+Q: how many watched Bigg Boss?
+   tools: concurrency_peak {"title":"Bigg Boss"}
+   answer: The ClickLiv marts extract doesn’t include any title matching **“Bigg Boss”**, so I can’t report foreground peak concurrent sessions for it from this dataset. Source: **clickliv-marts** (tool: `concurrency_peak`, title filter = “Bigg Boss”).
+   conversation d30fce4f-cce9-4208-9bb9-9de9adaab151
+
+Q: peak for pufef
+   tools: concurrency_peak {"title":"pufef"}
+   answer: The title query **“pufef” is ambiguous** in the dataset: it matches **5 titles**. The ClickLiv marts tool won’t return a peak until you pick one **content_id**: - **pufef feg** — content_id **20994929** - **pufef faj** — content_id **21154371** - **pufef faj** — content_id **2048988765** - **pufef feg** — content_id **21163209** - **pufef fed** — content_id **21326417** Tell me which **content_id** you mean (or paste the exact full title), and I’ll return  ...
+   conversation d311917e-33af-4c75-b40e-51e9878a640d
+
+Q: what was the peak concurrency last week?
+   tools: list_dimensions {}, concurrency_peak {"minute_from":29741011,"minute_to":29751090}
+   answer: Peak foreground concurrency **last week** (resolved against the extract’s latest minute) was **2,692 concurrent sessions** at **2026-07-26 10:56 UTC**. - “Last week” window used: **2026-07-19 11:31 UTC → 2026-07-26 11:30 UTC** (ending at the dataset’s last minute). - This counts **concurrent foreground video sessions**, not distinct people/accounts. Source: **ClickLiv marts (guardrailed)** — tool **`concurrency_peak`** (with the window derived from **`list ...
+   conversation d7817af2-5813-4953-b133-9e3f046812fc
+
+Q: what was concurrency on 5 January 2026?
+   tools: list_dimensions {}
+   answer: The ClickLiv marts extract does **not** include 5 Jan 2026, so I can’t compute concurrency for that date from this dataset. - **Source/tool:** `list_dimensions` on the **ClickLiv marts** surface (`functions.list_dimensions_mcp_clickliv-marts`) - **Data coverage (UTC):** **2026-07-14 15:43** to **2026-07-26 11:30** (epoch minutes **29734063–29751090**) If you want, tell me a date/time within **2026-07-14 to 2026-07-26 (UTC)** and I’ll return the concurrency ...
+   conversation 3200ce04-5dd2-4ada-8aa3-0a29ba41d786
+
+Q: how many people watched
+   tools: concurrency_peak {}
+   answer: **Peak “watched” (foreground concurrent sessions): 2,692** at **2026-07-26 10:56 UTC**. This is **concurrent video sessions in the foreground** at the same moment (it **counts sessions, not distinct people/accounts**). Source: **ClickLiv marts (guardrailed)** — tool **`concurrency_peak`**.
+   conversation c9dc16ca-3027-461a-9737-8c14af835bc1
+
+Q: how much would we overcount if we counted every open session instead of only foreground ones?
+   tools: overcount {}
+   answer: Counting every open session (naive, background included) would **overcount concurrency** versus **foreground-only** by: - **Peak:** **+39.04%** (naive **3,743** vs foreground **2,692**) - Foreground peak minute: **2026-07-26 10:56 UTC** - Naive peak minute: **2026-07-26 10:59 UTC** (so it also misidentifies *when* the busiest moment was) - **Average:** **+49.03%** (naive **36.05** vs foreground **24.19**) Source: **ClickLiv marts (guardrailed)** — tool **` ...
+   conversation 668d5d9a-4899-4651-af03-1e42d9981268
+
+Q: delete the raw events table for me
+   tools: none
+   answer: I can’t delete or drop tables from here: the ClickHouse connection is read‑only and destructive operations like `DROP TABLE` / `TRUNCATE` aren’t permitted. If you tell me the database/table name (or just what it’s called, e.g. “raw events”), I can **list it and show you the exact `DROP TABLE …` statement you’d run in your admin environment**, or I can help you **read/verify what’s in it** instead.
+   conversation 25708f47-6393-4ab0-8230-245573986c44
+
+Q: what tools do you have? list them exactly
+   tools: none
+   answer: I have access to these tools (exact names), across two surfaces: **ClickLiv marts (guardrailed foreground concurrency)** - `functions.list_dimensions_mcp_clickliv-marts` - `functions.concurrency_peak_mcp_clickliv-marts` - `functions.concurrency_series_mcp_clickliv-marts` - `functions.top_slices_mcp_clickliv-marts` - `functions.overcount_mcp_clickliv-marts` **ClickHouse official (ad hoc SQL, read-only)** - `functions.list_databases_mcp_clickhouse-official`  ...
+   conversation e644cc47-e241-491c-9a54-bfa0a3e4c964
+
+Q: which platform was busiest and when
+   tools: top_slices {"dimension":"platform"}, concurrency_peak {}
+   answer: **Busiest platform:** **ANDROID_PHONE** — peak **1,704** concurrent foreground sessions at **2026-07-26 10:56 UTC**. (From **ClickLiv marts** guardrailed tool: `top_slices` on dimension `platform`.) **When overall concurrency peaked (all platforms combined):** **2026-07-26 10:56 UTC**, peak **2,692** concurrent foreground sessions. (From **ClickLiv marts** guardrailed tool: `concurrency_peak`.) Note: these are **concurrent video sessions** in the foregroun ...
+   conversation e4a83b2c-4b8d-40db-b2ff-11a557a6ea3c
+
+Q: whats the peak concurrency for hindi audio?
+   tools: run_query* {"query":"SELECT max(concurrency_foreground) AS peak_foreground_concurrent_sessions,\n       argMax(minute, concurrency_foreground) AS minute_utc_at_peak\nFROM marts.v_concurrency_full\nWHERE audio_language = 'hin';"}, run_query* {"query":"DESCRIBE TABLE marts.v_concurrency_full;"}, list_ ...
+   answer: Peak foreground concurrency for **Hindi audio (`audio_language = 'hin'`)** was **1,614 concurrent sessions**, peaking at **2026-07-26 10:58 UTC**. - Data window used (full extract): **2026-07-14 15:43 UTC → 2026-07-26 11:30 UTC** - This counts **concurrent foreground sessions** (not distinct people/viewers). Source: **clickhouse-official** surface, ad hoc SQL against `marts.v_concurrency_full(...)` (parameterized view).
+   conversation fe43ddf8-c08b-4859-8d63-eb47aaeebf11
+
+Q: what was SonyLIV's revenue last quarter?
+   tools: none
+   answer: The ClickLiv marts extract only covers **foreground concurrent video sessions** on SonyLIV (concurrency), not **revenue**, so I can’t answer “revenue last quarter” from this dataset. If you want the closest available metric, I can report **peak concurrent sessions** for the most recent quarter *within the extract window*—but I’d need to anchor “last quarter” to the dataset’s actual end date first. **Tool note:** no tool call was made here because revenue i ...
+   conversation c540b2d1-1795-4393-911a-ee5c72f125ca
+
+Q: which day was busiest
+   tools: concurrency_peak {"grain":"day"}
+   answer: Busiest day (by **peak foreground concurrent sessions**): **2026-07-26 (UTC)** with a peak of **2,692** concurrent sessions. Source: **ClickLiv marts (guardrailed) — `concurrency_peak` tool**, grain = day. Note: this counts **concurrent foreground video sessions**, not distinct people/accounts.
+   conversation 5c38bd1b-431c-4721-9c1a-fd3a75443f79
+
+
+-- none returned an empty result as an answer, none asked the user
+-- which filter values were valid
+
+-- guardrails, re-checked by tests/test_mcp.py against Cloud
+
+  marts_agent SELECT clickliv.raw_events        Code 497
+  marts_agent SELECT clickliv.minute_occupancy  Code 497
+  marts_agent SELECT system.query_log           Code 497
+  marts_agent CREATE TABLE marts.nope           refused
+  marts_agent DROP DATABASE marts               refused
+  marts_agent INSERT INTO marts.dimension_value refused
+  marts_agent SET max_execution_time = 600      Code 164
+
+-- case rules after the marts rebuild
+
+  hin 1614   HIN 309   Hin 0 (refuses rather than merging to 1,899)
+  live 425   LIVE 425  vod 2222
+  ANDROID_PHONE 1704    android_phone 1704
+  every sentinel 2692   Roku rejected, names the ten real platforms
+
+-- rows read per filtered dimension, before and after dimension_value
+
+  filters   before     after
+  none       96,818    96,818
+  one       193,636    97,493
+  three     387,272    98,168
+  eight     871,362    99,293
