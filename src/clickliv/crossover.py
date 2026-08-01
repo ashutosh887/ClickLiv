@@ -1,9 +1,5 @@
-"""The problem statement's own example, reproduced with real numbers: "a dimension
-like platform and a content might peak at one minute, while a combination like
-platform + country might reach its peak at an entirely different minute." D6 already
-guarantees this holds (filter, sum, then max, never max first); this proves it through
-the actual served surface, marts.v_concurrency, not the raw tables.
-"""
+"""Reproduces the problem statement's own dimension-crossover example with real
+numbers, through marts.v_concurrency rather than the raw tables. See D30."""
 
 from __future__ import annotations
 

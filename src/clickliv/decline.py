@@ -1,17 +1,5 @@
-"""The problem statement's optional 'LLM & ClickStack' use case: detecting and
-alerting on concurrency decline (asset ended, system issue, or disengaging content).
-Detection is deterministic on purpose, not an LLM call: Abhishek Kumar's own stated
-philosophy (D11/JURY.md) is not to force an agent where a single threshold rule does
-the job, and this is the part that must never fail during a three-minute demo. Reads
-from the served surface (marts), not raw history, so it is itself a benchmark of what
-an alerting job would actually query.
-
-Narration is a separate, optional layer on top: one Bedrock call (bedrock.py),
-off unless AWS_BEARER_TOKEN_BEDROCK is set, same no-op-by-default pattern as
-ClickStack tracing (D26). Not Claude: verified D30's cross-region quota is still
-zero. openai.gpt-oss-120b through Bedrock's OpenAI-compatible endpoint works,
-confirmed with a real call. The detection result is identical with or without it.
-"""
+"""Optional decline alerting (D30). Detection is a deterministic threshold on marts;
+narration is one optional Bedrock call on top, off unless a key is set."""
 
 from __future__ import annotations
 

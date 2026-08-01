@@ -1,7 +1,4 @@
-"""Pure logic only: no live ClickHouse needed. The DB-dependent behavior is proven by
-Gates A/B/C/D instead, which are the real correctness tests for this project; these
-cover the parsing and redaction logic gates never happen to exercise on their own.
-"""
+"""Pure logic only, no live ClickHouse; Gates A/B/C/D cover the DB-dependent parts."""
 
 from __future__ import annotations
 

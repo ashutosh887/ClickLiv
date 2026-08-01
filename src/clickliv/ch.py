@@ -123,11 +123,8 @@ class ClickHouse:
         return self.query(sql, settings=settings).scalar()
 
     def insert_csv(self, sql: str, path: str | Path, settings: dict | None = None) -> str:
-        """sql must end in a FORMAT clause; the CSV body is streamed as the request payload.
-
-        Trailing whitespace is stripped: a newline after FORMAT makes the server read an
-        empty first data line out of the query string and mis-detect the header.
-        """
+        """sql must end in a FORMAT clause; stripped, since a trailing newline makes the
+        server misread the header as an empty first data line."""
         sql = sql.strip()
         path = Path(path)
         size = path.stat().st_size
@@ -144,14 +141,8 @@ class ClickHouse:
 
     def query_log_rows(self, columns: str, query_ids: list[str],
                         retries: int = 5, wait: float = 1.0) -> list[dict]:
-        """SYSTEM FLUSH LOGS then read back system.query_log for the given query_ids.
-
-        On a single node, flush-then-select is enough. On a multi-replica Cloud
-        service a query, the flush, and the select can each land on a different
-        replica, so a query that really ran can be briefly invisible here. Retried,
-        not assumed away: re-flush and re-select until every id is accounted for or
-        the retries run out, same bounded-retry discipline as load.reconcile.
-        """
+        """Flush and read system.query_log for query_ids, retrying on a multi-replica
+        service where a query and the read can land on different replicas."""
         ids = ",".join(f"'{q}'" for q in query_ids)
         rows: list[dict] = []
         for attempt in range(retries):

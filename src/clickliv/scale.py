@@ -203,9 +203,8 @@ def query_log_stats(ch: ClickHouse, query_id: str) -> dict:
 
 
 def scale_proof(ch: ClickHouse, artifacts: Path) -> list[dict]:
-    """Naive versus rollup read_rows at 1x, 10x and 100x of the real raw event count.
-    Regroups by (video_session_id, minute) off event_time, skipping the window-function
-    sessionizer so 100x finishes in minutes; write_evidence spells out why that's fair."""
+    """Naive versus rollup read_rows at 1x, 10x and 100x of the real event count.
+    Skips the window-function sessionizer so 100x finishes in minutes."""
     ch.command("DROP TABLE IF EXISTS scale_raw_events")
     ch.command("DROP TABLE IF EXISTS scale_minute_occupancy")
 

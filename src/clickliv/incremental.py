@@ -1,12 +1,5 @@
-"""Proves the problem statement's update-handling scenario for real: "sessions that
-are still open, whose active ranges keep growing as new heartbeats arrive." A new
-heartbeat lands, mv_extend_open_session absorbs it with no rebuild, and the number it
-predicts is then checked against a full batch resessionize, the same two-paths-must-
-agree discipline as the rest of this project (D1). Restores the dataset afterward and
-drops the demo objects it created, same leave-no-trace pattern as Gate C: this is a
-self-contained proof, not a table left attached to raw_events for every future insert
-to pay for.
-"""
+"""Proves the incremental open-session path (D31) against a full batch rebuild, then
+restores the dataset and drops its demo objects, same pattern as Gate C."""
 
 from __future__ import annotations
 

@@ -56,11 +56,8 @@ def classify(event_type: str, event: str) -> int:
 
 
 class DimPool:
-    """Interns dimension tuples so 905K events hold ints, not strings.
-
-    After finalize the id is the tuple's rank in sorted order, which makes it usable
-    as the last term of the tie-break key.
-    """
+    """Interns dimension tuples to ints; after finalize the id is the tuple's sorted
+    rank, usable as the last term of the tie-break key."""
 
     def __init__(self) -> None:
         self.ids: dict[tuple, int] = {}
@@ -112,11 +109,8 @@ def read_events(path: Path, pool: DimPool) -> dict[str, list[Event]]:
 
 
 def active_intervals(events: list[Event], gap: int, grace: int) -> list[tuple[int, int]]:
-    """A session is active while playing and foregrounded and heartbeat-fresh.
-
-    Any transition out of that state closes the open segment at the event's own
-    timestamp; a gap or the end of the stream closes it one heartbeat later.
-    """
+    """Active while playing, foregrounded, and heartbeat-fresh; any exit closes the
+    segment at that event, a gap or stream end closes it one heartbeat later."""
     out: list[tuple[float, float]] = []
     playing = False
     foreground = True

@@ -1,7 +1,5 @@
-"""Projection evidence. content_id sits last in minute_occupancy's ORDER BY (D7), so a
-content_id filter only gets generic exclusion search on the base table; a projection
-reordered by (content_id, minute) makes it a real prefix instead.
-"""
+"""Projection evidence: content_id is off-prefix in minute_occupancy (D7); the
+projection reorders by (content_id, minute) to make it a real prefix."""
 
 from __future__ import annotations
 

@@ -1,9 +1,5 @@
-"""One optional LLM call, for the problem statement's own "LLM & ClickStack" decline-
-alert use case. A no-op unless AWS_BEARER_TOKEN_BEDROCK is set, same off-by-default
-pattern as otel.py. Claude via Bedrock is not reachable in this account (D30: the
-cross-region inference profile's token quota is stuck at 0 and not self-service
-adjustable); openai.gpt-oss-120b through Bedrock's OpenAI-compatible endpoint is,
-verified with a real call. One call, not a chain, per D11's own restraint.
+"""One optional LLM call for decline alerting. No-op unless AWS_BEARER_TOKEN_BEDROCK
+is set; see D30 for why openai.gpt-oss-120b, not Claude.
 """
 
 from __future__ import annotations

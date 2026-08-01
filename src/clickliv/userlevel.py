@@ -1,7 +1,5 @@
-"""O4/D16 evidence. Session-level is the served default; this proves the alternative
-would be safe, not just declared. `uniq` is HyperLogLog-backed and mergeable
-(uniqState/uniqMerge), bounded in memory unlike uniqExact at high cardinality.
-"""
+"""O4/D16 evidence: proves user-level concurrency would be safe via uniqState/
+uniqMerge, without serving it, session-level stays the default."""
 
 from __future__ import annotations
 

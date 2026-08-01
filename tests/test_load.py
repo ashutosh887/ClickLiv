@@ -1,10 +1,5 @@
-"""EXPECTED is the ground truth reconcile() diffs against; a silent edit here would
-silently change what "correct" means for every future load. Pinned so that drift is
-a deliberate, reviewed change, not an accident. Verified against both local Docker
-and a real ClickHouse Cloud service in this session; join_orphans = 0 specifically
-depends on load.reload_dictionary_everywhere actually running before raw_events is
-enriched (D30/multi-replica note), not just on the input CSVs being unchanged.
-"""
+"""Pins EXPECTED so a drift in what reconcile() diffs against is a reviewed change,
+not an accident. Verified against local Docker and Cloud alike (D32)."""
 
 from __future__ import annotations
 
