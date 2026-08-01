@@ -93,8 +93,8 @@ files rather than served from a URL.
 - **[librechat.15-252-63-157.sslip.io](https://librechat.15-252-63-157.sslip.io)** is
   the conversational surface. Ask about foreground concurrency and the guardrailed
   marts tools answer; it can also fall back to a read only ClickHouse MCP server for
-  ad hoc questions. Demo login in `credentials.env` (gitignored, template in
-  `credentials.env.example`).
+  ad hoc questions. Demo login in `credentials.env`, which is gitignored and local
+  only.
 - **[langfuse.15-252-63-157.sslip.io](https://langfuse.15-252-63-157.sslip.io)** is the
   LLM observability pillar: every chat call above is traced here, and its own storage
   is entirely ClickHouse products, traces in ClickHouse Cloud, transactional state in
