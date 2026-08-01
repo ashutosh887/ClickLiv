@@ -6,7 +6,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from . import bedrock
+from . import llm
 from .ch import ClickHouse
 
 DROP_THRESHOLD_PCT = 50.0
@@ -54,16 +54,17 @@ def run(ch: ClickHouse, evidence: Path) -> bool:
 
     narration = None
     if rows:
-        narration = bedrock.narrate(
+        narration, label = llm.narrate(
             "In one or two sentences, given these concurrency-decline alerts from a "
             "streaming platform (minute, before, after, percent drop), suggest which "
             "of the three named causes (asset ended, system issue, disengaging "
             "content) is most likely and why, from the pattern alone: "
             + "; ".join(f"minute {r['minute']}: {int(r['prev_s'])}->{int(r['s'])} "
-                         f"({r['drop_pct']}%)" for r in rows))
+                         f"({r['drop_pct']}%)" for r in rows),
+            span_name="llm.decline_narration")
         if narration:
-            lines.append(f"\nnarration ({bedrock.MODEL} via Bedrock, one call, "
-                          f"optional, off by default): {narration}\n")
+            lines.append(f"\nnarration ({label}, one call, optional, "
+                          f"off by default): {narration}\n")
 
     (evidence / "decline_alerts.txt").write_text("".join(lines))
 

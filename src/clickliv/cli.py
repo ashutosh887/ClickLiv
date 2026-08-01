@@ -285,8 +285,7 @@ def main(argv: list[str]) -> int:
         print(f"unknown command: {command}")
         return 2
 
-    otel.TRACER = otel.Tracer(os.environ.get("CLICKSTACK_OTLP"),
-                              os.environ.get("CLICKSTACK_KEY"))
+    otel.TRACER = otel.Tracer(otel.sinks_from_env())
     otel.TRACER.attach(ch)
     try:
         with otel.span(f"clickliv.{command}"):

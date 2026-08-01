@@ -2,16 +2,44 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import os
 import time
 import urllib.error
 import urllib.request
 import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 
 from .ch import redact
 
 SERVER_METRICS = ("query_duration_ms", "read_rows", "read_bytes", "result_rows", "memory_usage")
+
+
+@dataclass
+class Sink:
+    """One OTLP/HTTP JSON destination. ClickStack observes the pipeline, Langfuse the LLM calls."""
+
+    name: str
+    url: str
+    headers: dict = field(default_factory=dict)
+
+
+def sinks_from_env() -> list[Sink]:
+    sinks = []
+    clickstack = os.environ.get("CLICKSTACK_OTLP")
+    if clickstack:
+        sinks.append(Sink("clickstack", f"{clickstack.rstrip('/')}/v1/traces",
+                          {"authorization": os.environ.get("CLICKSTACK_KEY", "")}))
+    host = os.environ.get("LANGFUSE_HOST")
+    public, secret = os.environ.get("LANGFUSE_PUBLIC_KEY"), os.environ.get("LANGFUSE_SECRET_KEY")
+    if host and public and secret:
+        token = base64.b64encode(f"{public}:{secret}".encode()).decode()
+        sinks.append(Sink("langfuse", f"{host.rstrip('/')}/api/public/otel/v1/traces",
+                          {"Authorization": f"Basic {token}",
+                           "x-langfuse-ingestion-version": "4"}))
+    return sinks
 
 
 def attribute(key: str, value) -> dict:
@@ -32,12 +60,10 @@ def note(record: dict | None, **attributes) -> None:
 
 
 class Tracer:
-    """A no-op unless CLICKSTACK_OTLP is set, so the default pipeline is byte identical."""
+    """A no-op unless a sink is configured, so the default pipeline is byte identical."""
 
-    def __init__(self, endpoint: str | None = None, key: str | None = None,
-                 service: str = "clickliv"):
-        self.endpoint = (endpoint or "").rstrip("/")
-        self.key = key or ""
+    def __init__(self, sinks: list[Sink] | None = None, service: str = "clickliv"):
+        self.sinks = sinks or []
         self.service = service
         self.trace_id = uuid.uuid4().hex
         self.spans: list[dict] = []
@@ -46,7 +72,7 @@ class Tracer:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.endpoint)
+        return bool(self.sinks)
 
     @contextmanager
     def span(self, name: str, **attributes):
@@ -129,16 +155,24 @@ class Tracer:
             ]},
             "scopeSpans": [{"scope": {"name": "clickliv"}, "spans": self.spans}],
         }]}).encode()
+        for sink in self.sinks:
+            self.deliver(sink, payload)
+
+    def deliver(self, sink: Sink, payload: bytes) -> None:
         request = urllib.request.Request(
-            f"{self.endpoint}/v1/traces", data=payload, method="POST",
-            headers={"Content-Type": "application/json", "authorization": self.key})
+            sink.url, data=payload, method="POST",
+            headers={"Content-Type": "application/json", **sink.headers})
         try:
             with urllib.request.urlopen(request, timeout=15) as response:
                 response.read()
-        except (urllib.error.URLError, OSError) as exc:
-            print(f"clickstack: {len(self.spans)} spans not delivered, {exc}")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:200]
+            print(f"{sink.name}: {len(self.spans)} spans rejected, {exc.code} {detail}")
             return
-        print(f"clickstack: {len(self.spans)} spans, trace {self.trace_id}")
+        except (urllib.error.URLError, OSError) as exc:
+            print(f"{sink.name}: {len(self.spans)} spans not delivered, {exc}")
+            return
+        print(f"{sink.name}: {len(self.spans)} spans, trace {self.trace_id}")
 
 
 TRACER = Tracer()
@@ -146,3 +180,21 @@ TRACER = Tracer()
 
 def span(name: str, **attributes):
     return TRACER.span(name, **attributes)
+
+
+def generation(name: str, model: str, prompt: str):
+    """An LLM span Langfuse renders as a generation, priced from the usage attributes."""
+    return TRACER.span(name, **{
+        "langfuse.observation.type": "generation",
+        "gen_ai.request.model": model,
+        "gen_ai.prompt": prompt,
+    })
+
+
+def completed(record: dict | None, output: str, usage: dict | None = None) -> None:
+    usage = usage or {}
+    note(record, **{"gen_ai.completion": output})
+    for key, attribute_name in (("input_tokens", "gen_ai.usage.input_tokens"),
+                                ("output_tokens", "gen_ai.usage.output_tokens")):
+        if usage.get(key) is not None:
+            note(record, **{attribute_name: int(usage[key])})
