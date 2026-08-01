@@ -109,13 +109,7 @@ class ClickHouse:
               query_id: str | None = None) -> Result:
         out, qid = self._post(sql.rstrip().rstrip(";") + "\nFORMAT JSONCompact",
                               query_id=query_id, settings=settings)
-        payload = json.loads(out)
-        return Result(
-            columns=[c["name"] for c in payload["meta"]],
-            rows=[tuple(r) for r in payload["data"]],
-            query_id=qid,
-            statistics=payload.get("statistics", {}),
-        )
+        return parse_jsoncompact(out, qid)
 
     def scalar(self, sql: str, settings: dict | None = None):
         return self.query(sql, settings=settings).scalar()
@@ -139,6 +133,16 @@ class ClickHouse:
 
     def ping(self) -> str:
         return self.scalar("SELECT version()")
+
+
+def parse_jsoncompact(payload: bytes | str, query_id: str = "") -> Result:
+    data = json.loads(payload)
+    return Result(
+        columns=[c["name"] for c in data["meta"]],
+        rows=[tuple(r) for r in data["data"]],
+        query_id=query_id,
+        statistics=data.get("statistics", {}),
+    )
 
 
 def split_statements(sql: str) -> list[str]:

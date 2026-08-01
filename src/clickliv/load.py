@@ -17,17 +17,9 @@ RAW_STRUCTURE = (
     "player_version String, session_start_epoch Int64"
 )
 
-CONTENT_INSERT = f"""
-INSERT INTO content_meta
-SELECT toUInt64(content_id), title, video_type, category
-FROM input('{CONTENT_STRUCTURE}')
-WHERE content_id >= 0
-FORMAT CSVWithNames
-"""
+CONTENT_PROJECTION = "toUInt64(content_id), title, video_type, category"
 
-RAW_INSERT = f"""
-INSERT INTO raw_events
-SELECT
+RAW_PROJECTION = """
     video_session_id,
     fromUnixTimestamp64Milli(event_timestamp, 'UTC'),
     user_id,
@@ -41,9 +33,21 @@ SELECT
     subtitle_language,
     player_version,
     fromUnixTimestamp64Milli(session_start_epoch, 'UTC')
-FROM input('{RAW_STRUCTURE}')
-FORMAT CSVWithNames
 """
+
+
+def content_insert(source: str) -> str:
+    return (f"INSERT INTO content_meta SELECT {CONTENT_PROJECTION} "
+            f"FROM {source} WHERE content_id >= 0")
+
+
+def raw_insert(source: str) -> str:
+    return f"INSERT INTO raw_events SELECT {RAW_PROJECTION} FROM {source}"
+
+
+CONTENT_INSERT = content_insert(f"input('{CONTENT_STRUCTURE}')") + "\nFORMAT CSVWithNames"
+
+RAW_INSERT = raw_insert(f"input('{RAW_STRUCTURE}')") + "\nFORMAT CSVWithNames"
 
 INSERT_SETTINGS = {
     "input_format_parallel_parsing": 1,
