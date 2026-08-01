@@ -32,6 +32,13 @@ SERVERS = ("mcp", "ui")
 REPLAY = ("reset", "schema", "load", "sessionize", "occupancy", "deltas", "reference",
           "verify", "marts", "projections", "answers", "instantaneous", "submission")
 
+UNSEEN = ("reset", "schema", "load", "sessionize", "occupancy", "deltas", "reference",
+          "verify", "incremental", "marts", "projections", "answers", "instantaneous",
+          "submission")
+
+UNSEEN_ROOTS = (("ARTIFACTS", "artifacts"), ("ANSWERS", "answers"),
+                ("EVIDENCE", "evidence"), ("SUBMISSION", "submission"))
+
 
 def load_dotenv(path: str = ".env") -> None:
     p = Path(path)
@@ -55,8 +62,28 @@ def render(sql: str) -> str:
     return re.sub(r"\$\{(\w+)\}", sub, sql)
 
 
+def out_dir(key: str, default: str) -> Path:
+    """Every output root is redirectable, so an unseen day never overwrites the
+    committed tuning-data run."""
+    path = Path(os.environ.get(key, default))
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def artifacts_dir() -> Path:
-    return Path(os.environ.get("ARTIFACTS", "artifacts"))
+    return out_dir("ARTIFACTS", "artifacts")
+
+
+def answers_dir() -> Path:
+    return out_dir("ANSWERS", "answers")
+
+
+def evidence_dir() -> Path:
+    return out_dir("EVIDENCE", "evidence")
+
+
+def submission_dir() -> Path:
+    return out_dir("SUBMISSION", "submission")
 
 
 def run_sql_file(ch: ClickHouse, name: str) -> None:
@@ -179,20 +206,18 @@ def step_marts(ch: ClickHouse) -> int:
 
 def step_answers(ch: ClickHouse) -> int:
     from . import answers
-    return 0 if answers.run(ch, artifacts_dir()) else 1
+    return 0 if answers.run(ch, artifacts_dir(), answers_dir(), evidence_dir()) else 1
 
 
 def step_projections(ch: ClickHouse) -> int:
     from . import projections
     run_sql_file(ch, "07_projections.sql")
-    Path("evidence").mkdir(exist_ok=True)
-    return 0 if projections.run(ch, Path("evidence")) else 1
+    return 0 if projections.run(ch, evidence_dir()) else 1
 
 
 def step_scale(ch: ClickHouse) -> int:
     from . import scale
-    Path("evidence").mkdir(exist_ok=True)
-    return 0 if scale.run(ch, artifacts_dir() / "scale", Path("evidence")) else 1
+    return 0 if scale.run(ch, artifacts_dir() / "scale", evidence_dir()) else 1
 
 
 def step_ui(ch: ClickHouse) -> int:
@@ -203,37 +228,33 @@ def step_ui(ch: ClickHouse) -> int:
 
 def step_userlevel(ch: ClickHouse) -> int:
     from . import userlevel
-    Path("evidence").mkdir(exist_ok=True)
-    return 0 if userlevel.run(ch, Path("evidence")) else 1
+    return 0 if userlevel.run(ch, evidence_dir()) else 1
 
 
 def step_crossover(ch: ClickHouse) -> int:
     from . import crossover
-    Path("evidence").mkdir(exist_ok=True)
-    return 0 if crossover.run(ch, Path("evidence")) else 1
+    return 0 if crossover.run(ch, evidence_dir()) else 1
 
 
 def step_decline(ch: ClickHouse) -> int:
     from . import decline
-    Path("evidence").mkdir(exist_ok=True)
-    return 0 if decline.run(ch, Path("evidence")) else 1
+    return 0 if decline.run(ch, evidence_dir()) else 1
 
 
 def step_incremental(ch: ClickHouse) -> int:
     from . import incremental
-    Path("evidence").mkdir(exist_ok=True)
-    return 0 if incremental.run(ch, Path("evidence")) else 1
+    return 0 if incremental.run(ch, evidence_dir()) else 1
 
 
 def step_instantaneous(ch: ClickHouse) -> int:
     from . import instantaneous
-    Path("evidence").mkdir(exist_ok=True)
-    return 0 if instantaneous.run(ch, Path("evidence")) else 1
+    return 0 if instantaneous.run(ch, evidence_dir()) else 1
 
 
 def step_submission(ch: ClickHouse) -> int:
     from . import submission
-    return 0 if submission.run(ch, artifacts_dir()) else 1
+    return 0 if submission.run(ch, artifacts_dir(), submission_dir(),
+                               evidence_dir()) else 1
 
 
 def step_replay(ch: ClickHouse) -> int:
@@ -246,6 +267,46 @@ def step_replay(ch: ClickHouse) -> int:
             print(f"\nreplay FAILED at {name}")
             return status
     print(f"\nreplay complete in {time.time() - started:.0f}s")
+    return 0
+
+
+def step_unseen(ch: ClickHouse) -> int:
+    """The sealed-dataset run: a fresh pair of CSVs to answers, latencies and evidence,
+    in one command, into an output root of its own."""
+    from . import load as loader
+
+    root = Path(os.environ.get("UNSEEN_DIR", "unseen"))
+    for key, name in UNSEEN_ROOTS:
+        os.environ[key] = str(root / name)
+
+    print(f"raw      {loader.raw_csv()}")
+    print(f"content  {loader.content_csv()}")
+    print(f"target   {ch.config.host}:{ch.config.port} database {ch.config.database}")
+    print(f"output   {root}/\n")
+
+    ch.command(f"CREATE DATABASE IF NOT EXISTS {ch.config.database}", database="")
+
+    started = time.time()
+    slo = 0
+    for name in UNSEEN:
+        print(f"\n===== {name} =====")
+        status = run_step(ch, name)
+        if status and name == "submission":
+            slo = status
+        elif status:
+            print(f"\nunseen FAILED at {name}; nothing downstream of it was produced")
+            return status
+
+    print(f"\n===== produced in {time.time() - started:.0f}s =====")
+    for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        print(f"{str(path):<52}{path.stat().st_size:>10,} bytes")
+    print(f"\nanswers  {root}/answers/benchmark_answers.csv")
+    print(f"bundle   {root}/submission/  (csv, json, manifest, README)")
+    print(f"evidence {root}/evidence/    (query_log, latencies, explain, oracles, "
+          f"incremental update)")
+    if slo:
+        print("\nthe self-imposed serving SLO was missed; the bundle is complete and the "
+              "measured numbers are in the evidence")
     return 0
 
 
@@ -301,6 +362,7 @@ STEPS = {
     "instantaneous": step_instantaneous,
     "submission": step_submission,
     "replay": step_replay,
+    "unseen": step_unseen,
     "mcp": step_mcp,
     "obs": step_obs,
     "reset": step_reset,
