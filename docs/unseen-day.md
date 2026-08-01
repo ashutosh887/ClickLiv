@@ -270,3 +270,24 @@ reordered, carrying two columns we ignore and quoted fields holding a comma and 
 newline, with `country` renamed to `geo` and two other names shouted. The command it
 prints at the end runs that hostile pair end to end. It produces byte-identical answers
 to the plain pair, which is the check that matters.
+
+## If the numbers come out wrong
+
+Read the preflight output first. It prints the cadence histogram, the event vocabulary,
+the span and the dimension values it found, and most bad outcomes are already visible
+there before a single table is written.
+
+| What you see | Most likely cause | Where to look, and what to do |
+| --- | --- | --- |
+| Peak collapses to a small number | `GRACE_SECONDS` no longer matches the heartbeat cadence, so every session fragments between beats | Preflight prints the measured p50 and p90. If p90 differs from `GRACE_SECONDS`, run `make sweep` and re-derive the gap and grace pair from the curve rather than guessing |
+| Peak is far higher than expected | Foreground exclusion is not firing, because the background markers were renamed or are absent | Preflight lists `event_type` and `event` values present. Compare against `classify()` in `src/clickliv/reference.py` and `sql/02_sessionize.sql`, which must be changed together |
+| Everything is zero | Nothing counted as playing at all | Sessionize aborts loudly on an unknown vocabulary, so read that message. If the load itself was empty, `reconcile` reports it |
+| Peak lands in an absurd minute | Timestamps are seconds where milliseconds are expected, which puts every row near 1970 | Preflight fails on epochs outside the millisecond range before any table is touched |
+| A filtered slice returns zero while the total is fine | That dimension value does not exist on the new data | Preflight warns per benchmark slice by name. `marts.v_dimension_values` lists what does exist |
+| The four paths disagree | The model is wrong, not the data | `evidence/oracle_match.csv` and the Gate A output name which path diverged. `maxIntersections` shares no code with the rollup, so trust the disagreement |
+| Queries suddenly slow | The projection or `marts.dimension_value` was not rebuilt | Re-run `make projections` and `make marts`, then confirm with `system.query_log` |
+| The chat answers nothing | `marts.dimension_value` is stale after a reload | `make marts` repopulates it. The MCP server refreshes its cache on its own and needs no restart |
+| A published figure no longer matches | A document is stating a superseded number | `make claims` names every document and line still carrying the old value |
+
+The order to work in: preflight, then the gates, then `make claims`, then the serving
+layer. Nothing downstream is worth debugging while an upstream stage is still wrong.
