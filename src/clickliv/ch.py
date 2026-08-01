@@ -142,6 +142,28 @@ class ClickHouse:
     def ping(self) -> str:
         return self.scalar("SELECT version()")
 
+    def query_log_rows(self, columns: str, query_ids: list[str],
+                        retries: int = 5, wait: float = 1.0) -> list[dict]:
+        """SYSTEM FLUSH LOGS then read back system.query_log for the given query_ids.
+
+        On a single node, flush-then-select is enough. On a multi-replica Cloud
+        service a query, the flush, and the select can each land on a different
+        replica, so a query that really ran can be briefly invisible here. Retried,
+        not assumed away: re-flush and re-select until every id is accounted for or
+        the retries run out, same bounded-retry discipline as load.reconcile.
+        """
+        ids = ",".join(f"'{q}'" for q in query_ids)
+        rows: list[dict] = []
+        for attempt in range(retries):
+            self.command("SYSTEM FLUSH LOGS")
+            rows = self.query(
+                f"SELECT {columns} FROM system.query_log "
+                f"WHERE type = 'QueryFinish' AND query_id IN ({ids})").dicts()
+            if len(rows) >= len(query_ids) or attempt == retries - 1:
+                return rows
+            time.sleep(wait)
+        return rows
+
 
 def parse_jsoncompact(payload: bytes | str, query_id: str = "") -> Result:
     data = json.loads(payload)

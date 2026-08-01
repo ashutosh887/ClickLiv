@@ -92,6 +92,20 @@ def ingest(ch: ClickHouse, table: str, statement: str, path: Path) -> int:
     return rows
 
 
+def reload_dictionary_everywhere(ch: ClickHouse) -> None:
+    """A plain SYSTEM RELOAD only reaches whichever node handled the request. On a
+    multi-replica service that leaves other replicas serving a stale dictionary until
+    their own LIFETIME cycle catches up, silently mislabelling video_type/category for
+    any query routed there in the meantime. ON CLUSTER reaches every replica in one
+    call, deterministic rather than probabilistic, but needs Keeper, which the local
+    single-node target does not run; fall back to the plain form there.
+    """
+    try:
+        ch.command(f"SYSTEM RELOAD DICTIONARY ON CLUSTER default {ch.config.database}.content_dict")
+    except ClickHouseError:
+        ch.command("SYSTEM RELOAD DICTIONARY content_dict")
+
+
 def load(ch: ClickHouse) -> None:
     for path in (content_csv(), raw_csv()):
         if not path.exists():
@@ -112,13 +126,11 @@ def load(ch: ClickHouse) -> None:
             "content_meta is empty. Loading events now would enrich against an empty "
             "dictionary and silently produce unlabelled rows. See D12."
         )
-    ch.command("SYSTEM RELOAD DICTIONARY content_dict")
+    reload_dictionary_everywhere(ch)
     ingest(ch, "raw_events", RAW_INSERT, raw_csv())
 
 
-def reconcile(ch: ClickHouse) -> bool:
-    """Diff what landed against the measured tuning CSVs. A mismatch means the input changed."""
-    actual = ch.query("""
+RECONCILE_QUERY = """
     SELECT
         (SELECT count() FROM raw_events)                                    AS raw_rows,
         (SELECT uniqExact(video_session_id) FROM raw_events)                AS sessions,
@@ -128,7 +140,24 @@ def reconcile(ch: ClickHouse) -> bool:
         (SELECT count() FROM (
             SELECT DISTINCT content_id FROM raw_events
             WHERE NOT dictHas('content_dict', content_id)))                 AS join_orphans
-    """).dicts()[0]
+"""
+
+
+def reconcile(ch: ClickHouse, retries: int = 3, retry_wait: float = 2.0) -> bool:
+    """Diff what landed against the measured tuning CSVs. A mismatch means the input changed.
+
+    load() already reloads the dictionary everywhere before events are ingested
+    (reload_dictionary_everywhere), so join_orphans should already be 0 by the time
+    this runs. Retrying only join_orphans is defense in depth, not the primary fix.
+    Any other mismatch fails immediately, since retrying would only mask a real one.
+    """
+    for attempt in range(retries):
+        actual = ch.query(RECONCILE_QUERY).dicts()[0]
+        mismatched = {k for k, want in EXPECTED.items() if int(actual[k]) != want}
+        if not mismatched or mismatched != {"join_orphans"} or attempt == retries - 1:
+            break
+        reload_dictionary_everywhere(ch)
+        time.sleep(retry_wait)
 
     ok = True
     print(f"\n{'check':<18}{'measured':>12}{'FINDINGS.md':>14}")

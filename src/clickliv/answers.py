@@ -9,7 +9,7 @@ import json
 import uuid
 from pathlib import Path
 
-from .ch import ClickHouse
+from .ch import ClickHouse, ClickHouseError
 
 BENCHMARKS = [
     {"label": "day_peak_no_filter", "grain_minutes": 1440,
@@ -68,15 +68,10 @@ def run_benchmark(ch: ClickHouse, spec: dict, minute_from: int, minute_to: int) 
 
 
 def query_log_rows(ch: ClickHouse, query_ids: list[str]) -> list[dict]:
-    ch.command("SYSTEM FLUSH LOGS")
-    ids = ",".join(f"'{q}'" for q in query_ids)
-    return ch.query(f"""
-        SELECT query_id, query_duration_ms, read_rows, read_bytes,
-               result_rows, memory_usage, event_time
-        FROM system.query_log
-        WHERE type = 'QueryFinish' AND query_id IN ({ids})
-        ORDER BY event_time
-    """).dicts()
+    rows = ch.query_log_rows(
+        "query_id, query_duration_ms, read_rows, read_bytes, "
+        "result_rows, memory_usage, event_time", query_ids)
+    return sorted(rows, key=lambda r: r["event_time"])
 
 
 def oracle_match(ch: ClickHouse, artifacts: Path) -> dict:
@@ -110,10 +105,14 @@ def capture_explain(ch: ClickHouse, spec: dict, minute_from: int, minute_to: int
     args = CALL_ARGS.format(**spec, minute_from=minute_from, minute_to=minute_to)
     query = f"SELECT * FROM marts.v_concurrency({args})"
     plan = ch.query(f"EXPLAIN indexes = 1 {query}").rows
-    analyzed = ch.query(f"EXPLAIN ANALYZE {query}").rows
-    text = ("-- EXPLAIN indexes = 1\n" + "\n".join(r[0] for r in plan) +
-            "\n\n-- EXPLAIN ANALYZE\n" + "\n".join(r[0] for r in analyzed) + "\n")
-    (evidence / f"explain_{spec['label']}.txt").write_text(text)
+    text = "-- EXPLAIN indexes = 1\n" + "\n".join(r[0] for r in plan)
+    try:
+        analyzed = ch.query(f"EXPLAIN ANALYZE {query}").rows
+        text += "\n\n-- EXPLAIN ANALYZE\n" + "\n".join(r[0] for r in analyzed)
+    except ClickHouseError as exc:
+        text += (f"\n\n-- EXPLAIN ANALYZE unavailable on this server "
+                  f"(runnable EXPLAIN ANALYZE needs ClickHouse 26.7+): {exc}")
+    (evidence / f"explain_{spec['label']}.txt").write_text(text + "\n")
 
 
 def run(ch: ClickHouse, artifacts: Path, answers_dir: Path = Path("answers"),

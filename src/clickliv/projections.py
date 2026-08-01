@@ -37,10 +37,8 @@ def run(ch: ClickHouse, evidence: Path) -> bool:
 
     query_id = str(uuid.uuid4())
     ch.query(query, query_id=query_id)
-    ch.command("SYSTEM FLUSH LOGS")
-    used = ch.query(
-        f"SELECT projections, read_rows FROM system.query_log "
-        f"WHERE query_id = '{query_id}' AND type = 'QueryFinish'").rows[0]
+    rows = ch.query_log_rows("projections, read_rows", [query_id])
+    used = (rows[0]["projections"], rows[0]["read_rows"])
 
     text = (
         f"-- query: {query}\n"

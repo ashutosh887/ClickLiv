@@ -198,10 +198,8 @@ def build_scale_tables(ch: ClickHouse, sf: int, span_seconds: int) -> None:
 
 
 def query_log_stats(ch: ClickHouse, query_id: str) -> dict:
-    ch.command("SYSTEM FLUSH LOGS")
-    row = ch.query(f"SELECT read_rows, read_bytes FROM system.query_log "
-                    f"WHERE query_id = '{query_id}' AND type = 'QueryFinish'").rows[0]
-    return {"read_rows": int(row[0]), "read_bytes": int(row[1])}
+    row = ch.query_log_rows("read_rows, read_bytes", [query_id])[0]
+    return {"read_rows": int(row["read_rows"]), "read_bytes": int(row["read_bytes"])}
 
 
 def scale_proof(ch: ClickHouse, artifacts: Path) -> list[dict]:
