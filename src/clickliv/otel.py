@@ -154,6 +154,15 @@ class Tracer:
         for sink in self.sinks:
             self.deliver(sink, payload)
 
+    def flush(self, ch) -> None:
+        """Ship and start a new trace, so a long lived server emits one trace per request."""
+        if not self.enabled or not self.spans:
+            return
+        self.export(ch)
+        self.spans.clear()
+        self.by_query.clear()
+        self.trace_id = uuid.uuid4().hex
+
     def deliver(self, sink: Sink, payload: bytes) -> None:
         request = urllib.request.Request(
             sink.url, data=payload, method="POST",

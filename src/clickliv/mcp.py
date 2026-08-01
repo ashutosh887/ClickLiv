@@ -452,16 +452,6 @@ def health(agent: ClickHouse) -> dict:
         return {"ok": False, "user": AGENT_USER, "error": str(exc)[:400]}
 
 
-def flush_traces(admin: ClickHouse) -> None:
-    """Ship the spans collected so far, so a long lived server does not hoard them until exit."""
-    tracer = otel.TRACER
-    if not tracer.enabled or not tracer.spans:
-        return
-    tracer.export(admin)
-    tracer.spans.clear()
-    tracer.by_query.clear()
-
-
 def handler_for(ch: ClickHouse):
     agent = agent_connection(ch)
     otel.TRACER.attach(agent)
@@ -520,7 +510,7 @@ def handler_for(ch: ClickHouse):
                 return
             self.send_json(response, session=session)
             with lock:
-                flush_traces(ch)
+                otel.TRACER.flush(ch)
 
         def do_GET(self) -> None:
             if self.path.rstrip("/") == ENDPOINT:

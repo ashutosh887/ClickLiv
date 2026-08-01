@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 from . import otel
@@ -25,6 +26,8 @@ DEFAULTS = {
 }
 
 PIPELINE = ("schema", "load", "sessionize", "occupancy", "deltas")
+
+SERVERS = ("mcp", "ui")
 
 REPLAY = ("reset", "schema", "load", "sessionize", "occupancy", "deltas", "reference",
           "verify", "marts", "projections", "answers", "instantaneous", "submission")
@@ -325,8 +328,9 @@ def main(argv: list[str]) -> int:
 
     otel.TRACER = otel.Tracer(otel.sinks_from_env())
     otel.TRACER.attach(ch)
+    scope = nullcontext() if command in SERVERS else otel.span(f"clickliv.{command}")
     try:
-        with otel.span(f"clickliv.{command}"):
+        with scope:
             return STEPS[command](ch)
     finally:
         otel.TRACER.export(ch)
