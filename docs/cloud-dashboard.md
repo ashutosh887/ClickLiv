@@ -109,10 +109,23 @@ naive span count charges for them and foreground occupancy does not. That is the
 being measured. The remaining 3,649 minutes are exactly the row count of query 3, which
 is a useful internal consistency check.
 
-**Visualization type: Line.** Two series on one pair of axes: x is `ts`, and drag BOTH
-`foreground_concurrency` and `naive_concurrency` onto y. If they land on separate charts
-the tile has lost its entire point. Do not use Stacked bar here, since stacking would add
-the two series together and the whole claim is that one sits above the other.
+**Visualization type: Line.** Two series on one pair of axes. The editor gives every
+column three toggles, X, Y and Dimension. Set them exactly like this:
+
+| Column | X | Y | Dimension |
+| --- | --- | --- | --- |
+| `ts` | on | off | off |
+| `foreground_concurrency` | off | on | off |
+| `naive_concurrency` | off | on | off |
+
+**Leave Dimension off on all three.** Dimension splits one measure into several series by
+a categorical column, so it expects something like `platform`. Switching it on for
+`naive_concurrency`, which is numeric with thousands of distinct values, asks the chart
+for one series per value. Dimension would only be correct if the query returned a single
+measure plus a category to split it by, which this one does not.
+
+Do not use Stacked bar here either, since stacking adds the two series together and the
+whole claim is that one sits above the other.
 
 ### 3. concurrency_over_time
 
@@ -240,9 +253,14 @@ Open **Dashboards** in the left sidebar, next to SQL Console. Click **New Dashbo
 name it `ClickLiv, foreground concurrency`.
 
 For each tile: add a visualization, select the saved query by name, pick the chart type,
-and assign axes. Line and bar tiles need x and y set explicitly. Table tiles take no
-axes and render as soon as the query is selected. Drag a tile by its header to move it
-and drag a corner to resize.
+and assign axes. Line, Area and Bar Chart tiles need x and y set explicitly. Table tiles
+take no axes and render as soon as the query is selected. Drag a tile by its header to
+move it and drag a corner to resize.
+
+Leave the **Dimension** toggle off on every tile in this dashboard. It splits one measure
+into several series by a categorical column, and none of these six queries wants that:
+each already returns its series as separate columns. Switching Dimension on for a numeric
+column asks for one series per distinct value and breaks the chart.
 
 ## Step 3, add the six tiles in this order
 
