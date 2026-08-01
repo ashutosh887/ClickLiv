@@ -106,6 +106,9 @@ instantaneous:
 submission:
 	$(CLI) submission
 
+claims:
+	$(CLI) claims
+
 replay:
 	$(CLI) replay
 

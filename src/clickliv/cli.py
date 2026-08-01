@@ -320,6 +320,11 @@ def step_instantaneous(ch: ClickHouse) -> int:
     return 0 if instantaneous.run(ch, evidence_dir()) else 1
 
 
+def step_claims(ch: ClickHouse) -> int:
+    from . import claims
+    return claims.run(ch, update="--update" in sys.argv)
+
+
 def step_submission(ch: ClickHouse) -> int:
     from . import submission
     return 0 if submission.run(ch, artifacts_dir(), submission_dir(),
@@ -547,6 +552,7 @@ STEPS = {
     "incremental": step_incremental,
     "instantaneous": step_instantaneous,
     "submission": step_submission,
+    "claims": step_claims,
     "replay": step_replay,
     "unseen": step_unseen,
     "preflight": step_preflight,
