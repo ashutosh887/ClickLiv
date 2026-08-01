@@ -1,14 +1,14 @@
-import { config, query, send } from './_clickhouse.js';
+import { config, query, resolve, send } from './_clickhouse.js';
 
 const GRAINS = { minute: 1, hour: 60, day: 1440 };
 
-const SQL = `
+const SQL = (schema) => `
 SELECT bucket_minute,
        toDateTime(bucket_minute * 60, 'UTC') AS bucket_start,
        peak_concurrency,
        round(average_concurrency, 2) AS average_concurrency,
        minutes_in_bucket
-FROM marts.v_concurrency(
+FROM ${schema}.v_concurrency(
     grain_minutes = {grain:UInt32}, country = '', platform = {platform:String},
     video_type = {video_type:String}, content_id = 0,
     minute_from = 0, minute_to = 4294967295)
@@ -26,11 +26,15 @@ export default async function handler(req, res) {
   }
 
   try {
-    const result = await query(SQL, {
+    const { dataset, schema, datasets, unknown } = await resolve(req.query.dataset);
+    if (unknown) {
+      return send(res, 400, { error: `unknown dataset, available: ${datasets.join(', ')}` }, 0);
+    }
+    const result = await query(SQL(schema), {
       grain: GRAINS[grainName],
       platform,
       video_type: videoType,
-    });
+    }, schema);
     const rows = result.data.map(([bucket, start, peak, average, minutes]) => ({
       bucket_minute: bucket,
       bucket_start: start,
@@ -39,12 +43,13 @@ export default async function handler(req, res) {
       minutes_in_bucket: minutes,
     }));
     return send(res, 200, {
+      dataset,
       grain: grainName,
       filters: { platform, video_type: videoType },
       peak: rows.reduce((most, row) => Math.max(most, row.peak_concurrency), 0),
       rows,
       statistics: result.statistics,
-      served_by: `marts.v_concurrency as ${config().user}, readonly with a query budget`,
+      served_by: `${schema}.v_concurrency as ${config().user}, readonly with a query budget`,
     });
   } catch (error) {
     return send(res, 502, { error: String(error.message || error) }, 0);

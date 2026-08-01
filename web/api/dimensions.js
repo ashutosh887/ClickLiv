@@ -1,52 +1,58 @@
-import { query, send } from './_clickhouse.js';
+import { query, resolve, send } from './_clickhouse.js';
 
 const MAX_VALUES = 12;
 
-const VALUES = `
+const VALUES = (schema) => `
 SELECT dimension, value
-FROM marts.v_dimension_values
+FROM ${schema}.v_dimension_values
 WHERE dimension = {dimension:String} AND value != ''
 ORDER BY minutes_present DESC
 LIMIT {limit:UInt32}`;
 
-const PEAK = `
+const PEAK = (schema) => `
 SELECT max(peak_concurrency)
-FROM marts.v_concurrency(
+FROM ${schema}.v_concurrency(
     grain_minutes = 1440, country = '', platform = {platform:String},
     video_type = {video_type:String}, content_id = 0,
     minute_from = 0, minute_to = 4294967295)`;
 
-const HEADLINE = `
+const HEADLINE = (schema) => `
 SELECT foreground_peak, naive_peak, peak_overcount_pct, average_overcount_pct
-FROM marts.v_overcount`;
+FROM ${schema}.v_overcount`;
 
-async function valuesFor(dimension) {
-  const result = await query(VALUES, { dimension, limit: MAX_VALUES });
+async function valuesFor(schema, dimension) {
+  const result = await query(VALUES(schema), { dimension, limit: MAX_VALUES }, schema);
   return (result.data || []).map((row) => String(row[1]));
 }
 
-async function peakFor(platform, videoType) {
-  const result = await query(PEAK, { platform, video_type: videoType });
+async function peakFor(schema, platform, videoType) {
+  const result = await query(PEAK(schema), { platform, video_type: videoType }, schema);
   const value = result.data?.[0]?.[0];
   return value === null || value === undefined ? 0 : Number(value);
 }
 
-async function withPeaks(names, build) {
+async function withPeaks(schema, names, build) {
   const rows = await Promise.all(
-    names.map(async (name) => ({ name, peak: await peakFor(...build(name)) })));
+    names.map(async (name) => ({ name, peak: await peakFor(schema, ...build(name)) })));
   return rows.filter((row) => row.peak > 0).sort((a, b) => b.peak - a.peak);
 }
 
 export default async function handler(req, res) {
   try {
+    const { dataset, schema, datasets, unknown } = await resolve(req.query.dataset);
+    if (unknown) {
+      return send(res, 400, { error: `unknown dataset, available: ${datasets.join(', ')}` }, 0);
+    }
     const [platformNames, videoTypeNames] = await Promise.all([
-      valuesFor('platform'), valuesFor('video_type')]);
-    const headline = await query(HEADLINE);
+      valuesFor(schema, 'platform'), valuesFor(schema, 'video_type')]);
+    const headline = await query(HEADLINE(schema), {}, schema);
     const row = headline.data?.[0] || [];
     return send(res, 200, {
-      overall_peak: await peakFor('', ''),
-      platforms: await withPeaks(platformNames, (name) => [name, '']),
-      video_types: await withPeaks(videoTypeNames, (name) => ['', name]),
+      dataset,
+      datasets,
+      overall_peak: await peakFor(schema, '', ''),
+      platforms: await withPeaks(schema, platformNames, (name) => [name, '']),
+      video_types: await withPeaks(schema, videoTypeNames, (name) => ['', name]),
       headline: {
         foreground_peak: Number(row[0] ?? 0),
         naive_peak: Number(row[1] ?? 0),
