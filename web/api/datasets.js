@@ -24,12 +24,20 @@ async function describe(dataset) {
   }
 }
 
+function fingerprint(d) {
+  return [d.window_from, d.window_to, d.minutes_with_sessions, d.occupancy_rows].join('|');
+}
+
 export default async function handler(req, res) {
   try {
     const names = await datasets();
+    const described = await Promise.all(names.map(describe));
+    const primary = described[0];
+    const distinct = described.filter(
+      (d, i) => i === 0 || fingerprint(d) !== fingerprint(primary));
     return send(res, 200, {
-      default: names[0],
-      datasets: await Promise.all(names.map(describe)),
+      default: primary.name,
+      datasets: distinct,
     }, 60);
   } catch (error) {
     return send(res, 502, { error: String(error.message || error) }, 0);
