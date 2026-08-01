@@ -513,10 +513,14 @@ def step_obs(ch: ClickHouse) -> int:
 
 
 def step_reset(ch: ClickHouse) -> int:
-    ch.command("DROP DATABASE IF EXISTS marts")
-    ch.command("DROP USER IF EXISTS marts_agent")
-    ch.command("DROP ROLE IF EXISTS marts_readonly")
-    ch.command("DROP SETTINGS PROFILE IF EXISTS marts_budget")
+    """A scratch run drops only its own marts. The role, profile and user are global, so
+    only the primary run may drop them; otherwise a rehearsal takes the live demo down."""
+    marts = marts_database()
+    ch.command(f"DROP DATABASE IF EXISTS {marts}")
+    if marts == "marts":
+        ch.command("DROP USER IF EXISTS marts_agent")
+        ch.command("DROP ROLE IF EXISTS marts_readonly")
+        ch.command("DROP SETTINGS PROFILE IF EXISTS marts_budget")
     ch.command("DROP DICTIONARY IF EXISTS content_dict")
     for table in ("raw_events", "content_meta", "active_intervals", "session_minutes",
                   "minute_occupancy", "minute_deltas", "ref_intervals", "ref_rollup"):
