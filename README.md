@@ -335,12 +335,21 @@ first) is why the served view gets this right automatically.
 
 Decline alerting is called out as explicitly optional, "an LLM & ClickStack
 use-case," for concurrency dropping because an asset ended, a system issue, or
-disengaging content. `make decline` builds it deterministic instead: a
+disengaging content. `make decline` builds detection deterministic: a
 minute-over-minute drop threshold read from `marts.v_occupancy_minute`, not an LLM
 call. The problem statement itself says AI is not required for the core, and this
-sits adjacent to the core, not inside it, so a threshold rule is the right scope.
-One real event exists in the tuning data: 214 to 7 sessions, a 96.7% drop, found by
-the rule rather than manufactured. `evidence/decline_alerts.txt`.
+sits adjacent to the core, not inside it, so a threshold rule is the right scope for
+detection. One real event exists in the tuning data: 214 to 7 sessions, a 96.7% drop,
+found by the rule rather than manufactured. `evidence/decline_alerts.txt`.
+
+On top of that, one genuinely optional LLM call narrates *which* of the three named
+causes the pattern suggests, off unless `AWS_BEARER_TOKEN_BEDROCK` is set, same
+no-op-by-default discipline as ClickStack tracing. Not Claude: Bedrock's Claude
+inference profiles are not reachable from this account in `ap-south-1` (checked
+directly, token quota is stuck at 0 and not self-service adjustable). `openai.
+gpt-oss-120b` through Bedrock's OpenAI-compatible endpoint is, verified with a real
+call: given the 96.7% drop above, it correctly reasoned "asset-ended" from the shape
+of the drop alone, matching what a human would conclude from the same number.
 
 ## Session-level or user-level concurrency
 
@@ -474,6 +483,7 @@ src/clickliv/ui.py           the minimal concurrency dashboard
 src/clickliv/userlevel.py    O4, session-level vs user-level concurrency, measured
 src/clickliv/crossover.py    the problem statement's dimension-crossover example
 src/clickliv/decline.py      optional: deterministic concurrency-decline alerting
+src/clickliv/bedrock.py      one optional LLM call, off unless a Bedrock key is set
 sql/08_incremental.sql       open_session_state, mv_extend_open_session
 src/clickliv/incremental.py  proves the incremental path agrees with a batch rebuild
 src/clickliv/cli.py          command dispatch, identical for local and Cloud
