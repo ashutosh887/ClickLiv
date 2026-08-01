@@ -64,6 +64,25 @@ Start the stack with `make up && make obs-up && make llm-up && make chat-up`, th
 4317 and 4318, and keeps its own ClickHouse on 8124. ClickHouse itself answers on 8123
 in Docker and on 8443 when `.env` points at Cloud.
 
+## The public EC2 deployment
+
+LibreChat, Langfuse and ClickStack also run permanently on one EC2 instance
+(`i-04c48ddbea3351191`, `t3.large`, `ap-south-1`), behind Caddy for automatic HTTPS
+on sslip.io hostnames (no domain needed, real Let's Encrypt certs). Same
+`docker-compose.yml`, same `.env`, pointed at the same ClickHouse Cloud service, just
+not tied to anyone's laptop. The marts MCP server runs there too, as a systemd unit
+(`clickliv-mcp.service`) rather than a foreground process.
+
+The `clickhouse-mcp` container authenticates as `mcp_agent`, a read-only role scoped
+to `clickliv`/`marts` with a 20s/2GB/10k-row budget, never the Cloud admin `default`
+user. See `.env.example` for the SQL that creates it.
+
+An Elastic IP (`15.252.63.157`) keeps the address fixed across restarts. SSH key is
+`~/.ssh/clickliv-demo.pem`, security group `clickliv-demo-sg` allows only 22/80/443.
+Teardown after the deadline: `aws ec2 terminate-instances --instance-ids
+i-04c48ddbea3351191 --region ap-south-1` and release the Elastic IP, or it keeps
+billing in a tiny amount against the AWS hackathon credit.
+
 The only things that are not local are the managed services this project stores data in:
 a ClickHouse Cloud service named `ClickLiv` in `ap-south-1`, and the
 `clickliv-langfuse` managed Postgres service beside it. Both are private to the team's

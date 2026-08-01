@@ -87,13 +87,25 @@ files rather than served from a URL.
 
 ## Live demo
 
-- **[clickliv.vercel.app](https://clickliv.vercel.app)** is the permanent public piece:
-  the concurrency chart, deployed on Vercel, calling ClickHouse Cloud through a
-  serverless proxy so the read only key never reaches the browser.
-- Langfuse, LibreChat, the MCP server and ClickStack run on a laptop and are only
-  public while `./scripts/public_demo.sh` is running, over Cloudflare quick tunnels.
-  The URL changes on every run and the tunnel dies when the process stops, so none of
-  those are linked here. Start them yourself from [docs/operations.md](docs/operations.md).
+- **[clickliv.vercel.app](https://clickliv.vercel.app)** is the concurrency chart,
+  deployed on Vercel, calling ClickHouse Cloud through a serverless proxy so the read
+  only key never reaches the browser.
+- **[librechat.15-252-63-157.sslip.io](https://librechat.15-252-63-157.sslip.io)** is
+  the conversational surface. Ask about foreground concurrency and the guardrailed
+  marts tools answer; it can also fall back to a read only ClickHouse MCP server for
+  ad hoc questions. Demo login in `credentials.env` (gitignored, template in
+  `credentials.env.example`).
+- **[langfuse.15-252-63-157.sslip.io](https://langfuse.15-252-63-157.sslip.io)** is the
+  LLM observability pillar: every chat call above is traced here, and its own storage
+  is entirely ClickHouse products, traces in ClickHouse Cloud, transactional state in
+  ClickHouse managed Postgres.
+- **[clickstack.15-252-63-157.sslip.io](https://clickstack.15-252-63-157.sslip.io)** is
+  the ClickStack observability pillar, tracing the pipeline itself.
+
+All three self-hosted surfaces run on one EC2 instance in `ap-south-1`, next to the
+ClickHouse Cloud service, behind Caddy for automatic HTTPS. Stable as long as the
+instance is up, not tied to anyone's laptop. See
+[docs/operations.md](docs/operations.md) for the deploy.
 
 ## What's in the box
 
