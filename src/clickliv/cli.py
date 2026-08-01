@@ -31,8 +31,9 @@ PIPELINE = ("schema", "load", "sessionize", "occupancy", "deltas")
 
 SERVERS = ("mcp", "ui")
 
-REPLAY = ("reset", "schema", "load", "sessionize", "occupancy", "deltas", "reference",
-          "verify", "marts", "projections", "answers", "instantaneous", "submission")
+REPLAY = ("preflight", "snapshot", "reset", "schema", "load", "sessionize", "occupancy",
+          "deltas", "reference", "verify", "marts", "projections", "answers",
+          "instantaneous", "submission")
 
 UNSEEN = ("preflight", "snapshot", "reset", "schema", "load", "sessionize", "occupancy",
           "deltas", "reference", "verify", "incremental", "marts", "projections",
@@ -394,6 +395,8 @@ def step_replay(ch: ClickHouse) -> int:
         status = run_step(ch, name)
         if status:
             print(f"\nreplay FAILED at {name}")
+            print("no table was touched." if name == "preflight" else
+                  "the tables it replaced are still there under __prev: make rollback")
             return status
     print(f"\nreplay complete in {time.time() - started:.0f}s")
     return 0
