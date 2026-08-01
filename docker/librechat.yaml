@@ -45,8 +45,18 @@ mcpServers:
       as epoch minutes and as UTC timestamps. Never ask the user which filter
       values exist; that is what list_dimensions is for.
 
+      Never ask the user for a time window either. Every tool already defaults to
+      the whole dataset, so a missing time range is never a reason to withhold an
+      answer. "peak on android phone", "peak for iphone in india" and "average
+      versus peak" are all single tool calls with no time arguments at all.
+
       Leave a filter argument out to mean no filter on that dimension. There is no
-      "ALL" value to pass.
+      "ALL" value to pass, and values match whatever case you type.
+
+      When the question names a programme, pass it as the title argument rather
+      than guessing a content_id. If the dataset holds no such title the tool says
+      so and returns no number. Report that plainly. Never answer a question about
+      one title with the figure for everything.
 
       Always tell the user that the answer came from the guardrailed ClickLiv
       marts surface, and name the tool you called.
@@ -87,8 +97,26 @@ mcpServers:
       sensitive and the only ones that exist are listed by
       "SELECT * FROM marts.v_dimension_values"; country is only ever india.
 
+      Values match case insensitively, but only against values that exist. There is
+      no LIVE or VOD in this data, only live and vod, and the view now folds case so
+      either spelling works.
+
+      A question about one programme resolves through
+      "SELECT content_id FROM marts.v_titles WHERE positionCaseInsensitive(title,
+      'whatever') > 0". If that returns nothing, the dataset does not hold that
+      title; say so. Never answer a question about one title with the unfiltered
+      total.
+
       For the busiest moment overall: grain_minutes = 1, no filters, the full
       window from marts.v_data_window, then ORDER BY peak_concurrency DESC LIMIT 1.
+
+      "How much would we overcount by counting every open session" is one row:
+      "SELECT * FROM marts.v_overcount". marts.v_naive_vs_foreground has the same
+      comparison minute by minute.
+
+      All eight dimensions are filterable through marts.v_occupancy_full and
+      marts.v_concurrency_full, which add category, app_version, player_version,
+      audio_language and subtitle_language to the four the shorter views take.
 
       Whenever you answer from here, say so plainly and show the SQL you ran, so
       the reader can tell an ad hoc query apart from a published mart.

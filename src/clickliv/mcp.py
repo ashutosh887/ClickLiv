@@ -53,6 +53,11 @@ SERIES_SQL = f"SELECT minute, concurrency FROM marts.v_occupancy_minute({FILTER_
 WINDOW_SQL = ("SELECT min_minute, max_minute, minutes_with_sessions, span_days "
               "FROM marts.v_data_window")
 
+TITLE_SQL = ("SELECT content_id, title, minutes_present FROM marts.v_titles "
+             "WHERE title != '' AND positionCaseInsensitive(title, {needle:String}) > 0 "
+             "ORDER BY lower(title) = lower({needle:String}) DESC, minutes_present DESC "
+             "LIMIT 10")
+
 
 class ToolError(ValueError):
     pass
@@ -111,19 +116,53 @@ def integer_argument(arguments: dict, name: str, default: int, low: int, high: i
     return number
 
 
-def filter_settings(arguments: dict) -> dict:
+def resolve_title(agent: ClickHouse, title: str) -> int:
+    """A title becomes a content_id or the call fails; it never falls through to the total."""
+    needle = title.strip()
+    if not needle:
+        return 0
+    rows = agent.query(TITLE_SQL, settings={"param_needle": needle}).rows
+    if not rows:
+        raise ToolError(f"no title in this dataset matches {needle!r}, so there is no "
+                        "number to report for it; say the dataset does not cover that "
+                        "title rather than answering with a wider total")
+    exact = [row for row in rows if str(row[1]).lower() == needle.lower()]
+    if len(exact) == 1:
+        return int(exact[0][0])
+    if len(rows) == 1:
+        return int(rows[0][0])
+    listed = "; ".join(f"{row[1]} (content_id {row[0]})" for row in rows[:5])
+    raise ToolError(f"{needle!r} matches {len(rows)} titles, so it is ambiguous; call "
+                    f"again with one of these content_id values instead: {listed}")
+
+
+def content_id_argument(agent: ClickHouse, arguments: dict) -> int:
+    title = arguments.get("title")
+    if title in (None, ""):
+        return integer_argument(arguments, "content_id", 0, 0, 2 ** 64 - 1)
+    if not isinstance(title, str):
+        raise ToolError(f"title must be a string, got {title!r}")
+    if integer_argument(arguments, "content_id", 0, 0, 2 ** 64 - 1):
+        raise ToolError("pass either title or content_id, not both")
+    return resolve_title(agent, title)
+
+
+def filter_settings(arguments: dict, content_id: int) -> dict:
     return {
         "param_country": enum_argument(arguments, "country"),
         "param_platform": enum_argument(arguments, "platform"),
         "param_video_type": enum_argument(arguments, "video_type"),
-        "param_content_id": integer_argument(arguments, "content_id", 0, 0, 2 ** 64 - 1),
+        "param_content_id": content_id,
     }
 
 
-def filter_label(arguments: dict) -> str:
-    parts = [f"{name}={arguments[name]}" for name in ("platform", "country", "video_type",
-                                                      "content_id")
-             if arguments.get(name) not in (None, "", 0)]
+def filter_label(arguments: dict, content_id: int = 0) -> str:
+    parts = [f"{name}={arguments[name]}" for name in ("platform", "country", "video_type")
+             if arguments.get(name) not in (None, "")]
+    if arguments.get("title"):
+        parts.append(f"title={arguments['title']} (content_id {content_id})")
+    elif content_id:
+        parts.append(f"content_id={content_id}")
     return ", ".join(parts) or "none"
 
 
@@ -191,11 +230,14 @@ def downsample(rows: list[tuple], cap: int) -> tuple[list[tuple], int]:
 def tool_concurrency_peak(agent: ClickHouse, arguments: dict):
     """Peak and average concurrency per bucket from marts.v_concurrency.
     No arguments means the whole dataset at minute grain, which is the busiest moment."""
-    reject_unknown(arguments, ("grain", "platform", "country", "video_type", "content_id"))
+    reject_unknown(arguments, ("grain", "platform", "country", "video_type", "content_id",
+                               "title"))
     grain = arguments.get("grain") or DEFAULT_GRAIN
     if grain not in GRAINS:
         raise ToolError(f"grain must be one of {', '.join(GRAINS)}, got {grain!r}")
-    settings = {**filter_settings(arguments), "param_grain_minutes": GRAINS[grain],
+    content_id = content_id_argument(agent, arguments)
+    settings = {**filter_settings(arguments, content_id),
+                "param_grain_minutes": GRAINS[grain],
                 "param_minute_from": MINUTE_MIN, "param_minute_to": MINUTE_MAX}
     result = agent.query(PEAK_SQL, settings=settings)
     peak = max((row[1] for row in result.rows), default=0)
@@ -207,7 +249,7 @@ def tool_concurrency_peak(agent: ClickHouse, arguments: dict):
                    f"average concurrency {weighted / minutes:.1f} over {minutes:,} active minutes"]
     else:
         summary = ["no minutes matched, so there is no peak to report"]
-    summary.append(f"filters: {filter_label(arguments)}")
+    summary.append(f"filters: {filter_label(arguments, content_id)}")
     if len(result.rows) > 1:
         summary.append("buckets are listed busiest first, not in time order")
     rows = [(row[0], stamp(row[0]), row[1], round(float(row[2]), 1), row[3])
@@ -220,13 +262,14 @@ def tool_concurrency_series(agent: ClickHouse, arguments: dict):
     """Per minute concurrency from marts.v_occupancy_minute, bound as query parameters.
     Downsampled to stay readable in a chat, keeping the peak of each window."""
     reject_unknown(arguments, ("platform", "country", "video_type", "content_id",
-                               "minute_from", "minute_to"))
+                               "title", "minute_from", "minute_to"))
     minute_from = integer_argument(arguments, "minute_from", MINUTE_MIN, MINUTE_MIN, MINUTE_MAX)
     minute_to = integer_argument(arguments, "minute_to", MINUTE_MAX, MINUTE_MIN, MINUTE_MAX)
     if minute_from > minute_to:
         raise ToolError(f"minute_from {minute_from} is after minute_to {minute_to}")
-    settings = {**filter_settings(arguments), "param_minute_from": minute_from,
-                "param_minute_to": minute_to}
+    content_id = content_id_argument(agent, arguments)
+    settings = {**filter_settings(arguments, content_id),
+                "param_minute_from": minute_from, "param_minute_to": minute_to}
     result = agent.query(SERIES_SQL, settings=settings)
     peak = max((row[1] for row in result.rows), default=0)
     peak_minute = next((row[0] for row in result.rows if row[1] == peak), None)
@@ -236,7 +279,7 @@ def tool_concurrency_series(agent: ClickHouse, arguments: dict):
                    f"window: {stamp(result.rows[0][0])} to {stamp(result.rows[-1][0])}"]
     else:
         summary = ["no minutes matched in this window"]
-    summary.append(f"filters: {filter_label(arguments)}")
+    summary.append(f"filters: {filter_label(arguments, content_id)}")
     if stride > 1:
         summary.append(f"downsampled to {len(points)} points, each the peak of a "
                        f"{stride} minute window")
@@ -315,6 +358,14 @@ TOOLS = [
                 "content_id": {"type": "integer", "minimum": 0,
                                "description": "Optional content id filter. Leave it out, or "
                                               "pass 0, for every title."},
+                "title": {"type": "string",
+                          "description": "Optional title of a single programme, matched "
+                                         "case insensitively and by substring against the "
+                                         "catalogue. Use this instead of content_id when "
+                                         "the question names a show or a film. If the "
+                                         "dataset holds no such title the call fails "
+                                         "rather than answering for everything, so report "
+                                         "that the dataset does not cover it."},
             },
             "additionalProperties": False,
         },
@@ -344,6 +395,12 @@ TOOLS = [
                 "content_id": {"type": "integer", "minimum": 0,
                                "description": "Optional content id filter. Leave it out, or "
                                               "pass 0, for every title."},
+                "title": {"type": "string",
+                          "description": "Optional title of a single programme, matched "
+                                         "case insensitively and by substring against the "
+                                         "catalogue. The call fails if the dataset holds "
+                                         "no such title, rather than answering for "
+                                         "everything."},
                 "minute_from": {"type": "integer", "minimum": MINUTE_MIN, "maximum": MINUTE_MAX,
                                 "description": "Inclusive start, in minutes since the unix "
                                                "epoch, so a unix timestamp divided by 60. "
