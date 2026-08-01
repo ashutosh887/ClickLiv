@@ -45,7 +45,7 @@ def measure(ch: ClickHouse) -> dict:
     for dim in ("country", "platform", "video_type", "category",
                 "audio_language", "subtitle_language"):
         out[f"distinct_{dim}"] = ch.scalar(
-            f"SELECT count() FROM {marts}.v_dimension_values WHERE dimension = '{dim}'")
+            f"SELECT count() FROM {marts}.dimension_value WHERE dimension = '{dim}'")
 
     window_args = (f"minute_from = {window['min_minute']}, "
                    f"minute_to = {window['max_minute']}")
