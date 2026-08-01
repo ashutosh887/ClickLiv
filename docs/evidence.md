@@ -49,7 +49,7 @@ The rest of the evidence directory follows the same rule, one file per proof:
 things nobody upstream specified.
 
 Rather than leave serving latency unstated, the target is ours and stated: p99 under
-100ms. The committed run measures p99 **30ms**, p50 22ms, p95 27ms, min 16ms over 40
+100ms. The committed run measures p99 **42ms**, p50 29ms, p95 32ms, min 28ms over 40
 samples, 8 benchmark queries times 5 repetitions, every one of them server-side
 `query_duration_ms` read from `system.query_log` by `query_id` rather than client wall
 clock. Latency moves a millisecond or two run to run, which is exactly why

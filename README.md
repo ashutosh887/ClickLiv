@@ -23,7 +23,7 @@ in the wrong minute. Peak is 2,692 foreground-only against 3,743 naive.
 | Peak, vod on Mweb | 62 |
 | Heartbeat cadence, measured (the data dictionary says 60s) | 40s |
 | Threshold sensitivity, grace 20s to 60s by gap 60s to 120s | peak moves 0.3%, peak minute never moves |
-| Serving latency, server-side, 40 samples | p99 30ms against a stated 100ms target, p50 22ms, p95 27ms |
+| Serving latency, server-side, 40 samples | p99 42ms against a stated 100ms target, p50 29ms, p95 32ms |
 | Gates | A 12/12 PASS, B byte-identical rebuild, C PASS on a held-out day, D chDB agrees with the server |
 
 Every number above is produced by a query this repository ran, tagged with a `query_id`
