@@ -165,11 +165,14 @@ services:
       - "3080:3080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    env_file:
-      - ./docker/librechat.env
     environment:
       HOST: 0.0.0.0
       PORT: "3080"
+      APP_TITLE: ClickLiv
+      CREDS_KEY: ${LIBRECHAT_CREDS_KEY}
+      CREDS_IV: ${LIBRECHAT_CREDS_IV}
+      JWT_SECRET: ${LIBRECHAT_JWT_SECRET}
+      JWT_REFRESH_SECRET: ${LIBRECHAT_JWT_REFRESH_SECRET}
       MONGO_URI: mongodb://librechat-mongo:27017/LibreChat
       DOMAIN_CLIENT: ${LIBRECHAT_PUBLIC_URL:-http://localhost:3080}
       DOMAIN_SERVER: ${LIBRECHAT_PUBLIC_URL:-http://localhost:3080}
