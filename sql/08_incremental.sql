@@ -9,8 +9,8 @@ DROP TABLE IF EXISTS open_session_state;
 CREATE TABLE open_session_state
 (
     video_session_id String CODEC(ZSTD(1)),
-    segment_start_ms Int64 CODEC(DoubleDelta, ZSTD(1)),
-    last_active_ms   Int64 CODEC(DoubleDelta, ZSTD(1)),
+    segment_start_ms Int64 CODEC(ZSTD(1)),
+    last_active_ms   Int64 CODEC(ZSTD(1)),
     version          Int64
 )
 ENGINE = ReplacingMergeTree(version)
