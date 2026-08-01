@@ -252,7 +252,17 @@ def step_chdb(ch: ClickHouse) -> int:
     return 0 if chdb_engine.run(ch, render, SQL_DIR, artifacts_dir()) else 1
 
 
+def marts_database() -> str:
+    """Only the normal database owns the `marts` name, so a scratch run cannot rebind it."""
+    database = os.environ.get("CH_DATABASE", DEFAULTS["CH_DATABASE"])
+    if database == DEFAULTS["CH_DATABASE"]:
+        return "marts"
+    return f"marts_{database}"
+
+
 def step_marts(ch: ClickHouse) -> int:
+    os.environ["MARTS_DB"] = marts_database()
+    print(f"-- building {os.environ['MARTS_DB']} from {ch.config.database}")
     run_sql_file(ch, "06_marts.sql")
     return 0
 
