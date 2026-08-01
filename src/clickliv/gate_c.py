@@ -25,7 +25,7 @@ STEP_ORDER = ("schema", "load", "sessionize", "occupancy", "deltas", "reference"
 def held_out_day(raw_csv: Path) -> int:
     """The last calendar day in the tuning data, standing in for the day that has not landed yet."""
     latest = None
-    with raw_csv.open(newline="") as fh:
+    with loader.open_text(raw_csv) as fh:
         for row in csv.DictReader(fh):
             day = int(row["event_timestamp"]) // DAY_MS
             if latest is None or day > latest:
@@ -38,7 +38,7 @@ def held_out_day(raw_csv: Path) -> int:
 def split_day(raw_csv: Path, day: int, out_path: Path) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     written = 0
-    with raw_csv.open(newline="") as fh, out_path.open("w", newline="") as out:
+    with loader.open_text(raw_csv) as fh, out_path.open("w", newline="") as out:
         reader = csv.reader(fh)
         writer = csv.writer(out)
         header = next(reader)

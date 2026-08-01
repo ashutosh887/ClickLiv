@@ -9,6 +9,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from .load import CONTENT_TYPES, RAW_TYPES, open_text, shape
+
 PAUSE = frozenset({"pause", "speed-pause", "AdPause"})
 RESUME = frozenset({"resume", "speed-resume", "AdResume"})
 STOP_TYPES = frozenset({"VideoError", "VideoSessionEnd"})
@@ -81,25 +83,35 @@ class DimPool:
         return remap
 
 
+def rows_of(path: Path, types: dict[str, str]):
+    """Same header, delimiter and gzip handling the loader uses, so both paths read
+    the file the same way."""
+    sh = shape(path, types)
+    with open_text(path) as fh:
+        reader = csv.reader(fh, delimiter=sh.delimiter)
+        next(reader)
+        for values in reader:
+            yield dict(zip(sh.header, values))
+
+
 def read_events(path: Path, pool: DimPool) -> dict[str, list[Event]]:
     sessions: dict[str, list[Event]] = {}
-    with path.open(newline="") as fh:
-        for row in csv.DictReader(fh):
-            dims = pool.intern((
-                sys.intern(row["platform"]),
-                sys.intern(row["app_version"]),
-                sys.intern(row["country"]),
-                sys.intern(row["audio_language"]),
-                sys.intern(row["subtitle_language"]),
-                sys.intern(row["player_version"]),
-                int(row["content_id"]),
-            ))
-            event = Event(
-                ts=int(row["event_timestamp"]),
-                kind=classify(row["event_type"], row["event"]),
-                dims=dims,
-            )
-            sessions.setdefault(row["video_session_id"], []).append(event)
+    for row in rows_of(path, RAW_TYPES):
+        dims = pool.intern((
+            sys.intern(row["platform"]),
+            sys.intern(row["app_version"]),
+            sys.intern(row["country"]),
+            sys.intern(row["audio_language"]),
+            sys.intern(row["subtitle_language"]),
+            sys.intern(row["player_version"]),
+            int(row["content_id"]),
+        ))
+        event = Event(
+            ts=int(row["event_timestamp"]),
+            kind=classify(row["event_type"], row["event"]),
+            dims=dims,
+        )
+        sessions.setdefault(row["video_session_id"], []).append(event)
     remap = pool.finalize()
     for events in sessions.values():
         for event in events:
@@ -198,12 +210,14 @@ def build(raw_path: Path, content_path: Path) -> dict:
     pool = DimPool()
     sessions = read_events(raw_path, pool)
 
+    if not sessions:
+        raise SystemExit(f"{raw_path} produced no events; nothing to build a reference from")
+
     content: dict[int, tuple[str, str]] = {}
-    with content_path.open(newline="") as fh:
-        for row in csv.DictReader(fh):
-            cid = int(row["content_id"])
-            if cid >= 0:
-                content[cid] = (row["video_type"], row["category"])
+    for row in rows_of(content_path, CONTENT_TYPES):
+        cid = int(row["content_id"])
+        if cid >= 0:
+            content[cid] = (row["video_type"], row["category"])
 
     rollup: dict[tuple, int] = {}
     all_intervals: list[tuple[float, float]] = []
@@ -239,6 +253,12 @@ def build(raw_path: Path, content_path: Path) -> dict:
     totals: dict[int, int] = {}
     for key, count in rollup.items():
         totals[key[0]] = totals.get(key[0], 0) + count
+
+    if not totals:
+        raise SystemExit(
+            f"{raw_path} has {len(sessions)} session(s) but none of them is ever active. "
+            "Check GAP_SECONDS/GRACE_SECONDS and that event_type/event use the expected "
+            "vocabulary; see docs/unseen-day.md.")
 
     peak_minute = max(totals, key=lambda m: (totals[m], -m))
     inst_peak, inst_at = instantaneous_peak(all_intervals)

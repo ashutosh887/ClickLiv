@@ -81,7 +81,7 @@ class ClickHouse:
 
     def _post(self, sql: str, body=None, length: int | None = None,
               query_id: str | None = None, settings: dict | None = None,
-              database: str | None = None) -> tuple[bytes, str]:
+              database: str | None = None, gzipped: bool = False) -> tuple[bytes, str]:
         qid = query_id or str(uuid.uuid4())
         params = {"query": sql, "query_id": qid}
         db = self.config.database if database is None else database
@@ -95,6 +95,8 @@ class ClickHouse:
         req.add_header("X-ClickHouse-Key", self.config.password)
         if length is not None:
             req.add_header("Content-Length", str(length))
+        if gzipped:
+            req.add_header("Content-Encoding", "gzip")
         start = time.time_ns()
         error = None
         try:
@@ -123,14 +125,16 @@ class ClickHouse:
     def scalar(self, sql: str, settings: dict | None = None):
         return self.query(sql, settings=settings).scalar()
 
-    def insert_csv(self, sql: str, path: str | Path, settings: dict | None = None) -> str:
+    def insert_csv(self, sql: str, path: str | Path, settings: dict | None = None,
+                   gzipped: bool = False) -> str:
         """sql must end in a FORMAT clause; stripped, since a trailing newline makes the
         server misread the header as an empty first data line."""
         sql = sql.strip()
         path = Path(path)
         size = path.stat().st_size
         with path.open("rb") as fh:
-            _, qid = self._post(sql, body=fh, length=size, settings=settings)
+            _, qid = self._post(sql, body=fh, length=size, settings=settings,
+                                gzipped=gzipped)
         return qid
 
     def script(self, sql: str, settings: dict | None = None) -> None:
