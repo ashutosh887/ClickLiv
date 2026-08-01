@@ -1,0 +1,108 @@
+-- EXPLAIN indexes = 1
+Output: minute DIV 1440 * 1440, max(sum(sessions)), avg(sum(sessions)), count()
+
+Sorting (Sorting for ORDER BY)
+│  Sort description: minute DIV 1440 * 1440 ASC
+└──Aggregating
+   │  Keys: minute DIV 1440 * 1440
+   │  Aggregates: max(sum(sessions)), avg(sum(sessions)), count()
+   │  Skip merging: 0
+   └──Aggregating
+      │  Keys: minute
+      │  Aggregates: sum(sessions)
+      │  Skip merging: 0
+      └──ReadFromMergeTree (clickliv.minute_occupancy)
+            Read type: Default
+            Parts: 1 | Granules: 11
+            Output: minute, sessions
+            Prewhere filter
+            Prewhere filter column:  country = coalesce(NULL, country) AND platform = coalesce(NULL, platform) AND video_type = coalesce(NULL, video_type) AND minute <= 29751090 AND minute >= 29750410 AND content_id = coalesce(NULL, content_id)
+            Indexes:
+              Min-Max
+                Keys:
+                  minute
+                Condition: and((minute in (-Inf, 29751090]), (minute in [29750410, +Inf)))
+                Parts: 1/1
+                Granules: 11/11
+              Partition
+                Condition: true
+                Parts: 1/1
+                Granules: 11/11
+              PrimaryKey
+                Keys:
+                  minute
+                Condition: and((minute in (-Inf, 29751090]), (minute in [29750410, +Inf)))
+                Parts: 1/1
+                Granules: 11/11
+                Search Algorithm: generic exclusion search
+              Ranges: 1
+
+-- EXPLAIN ANALYZE
+Query summary:
+  Time:        7.01 ms (planning 3.60 ms · execution 3.41 ms)
+  Read:        89.74 thousand rows, 1.71 MB (26.28 million rows/s., 499.41 MB/s.)
+  Peak memory: 448.66 KiB
+
+Output: minute DIV 1440 * 1440, max(sum(sessions)), avg(sum(sessions)), count()
+
+Expression ((Project names + (Projection + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Project names + (Projection + (Change column names to column identifiers + Project names))))))))
+│  I/O: rows 1 → 1 · 32 B → 32 B
+│    time 958.00 ns (0.0%) · parallelism 0.96/1
+└──Sorting (Sorting for ORDER BY)
+   │  Sort description: minute DIV 1440 * 1440 ASC
+   │  I/O: rows 1 → 1 · 32 B → 32 B
+   │    Stage (sorting): time 7.67 us (0.2%) · parallelism 0.96/2
+   │    Stage (merge sorted streams): time 4.50 us (0.1%) · parallelism 1.00/1
+   └──Expression ((Before ORDER BY + Projection))
+      │  I/O: rows 1 → 1 · 32 B → 32 B
+      │    time 833.00 ns (0.0%) · parallelism 0.95/1
+      └──Aggregating
+         │  Keys: minute DIV 1440 * 1440
+         │  Aggregates: max(sum(sessions)), avg(sum(sessions)), count()
+         │  Skip merging: 0
+         │  I/O: rows 633 → 1 (0.16%) · 10.13 KB → 32 B
+         │    Stage (partial aggregation): time 31.83 us (0.9%) · parallelism 1.00/1
+         │    Stage (final aggregation): time 3.83 us (0.1%) · parallelism 0.99/1
+         └──Expression ((Before GROUP BY + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Project names + (Projection + (Change column names to column identifiers + (Project names + (Before ORDER BY + Projection)))))))))
+            │  I/O: rows 633 → 633 · 7.60 KB → 10.13 KB
+            │    time 2.63 us (0.1%) · parallelism 1.00/1
+            └──Aggregating
+               │  Keys: minute
+               │  Aggregates: sum(sessions)
+               │  Skip merging: 0
+               │  I/O: rows 89.74 thousand → 633 (0.71%) · 717.91 KB → 7.60 KB
+               │    Stage (partial aggregation): time 170.42 us (5.0%) · parallelism 1.00/1
+               │    Stage (final aggregation): time 14.67 us (0.4%) · parallelism 0.99/1
+               └──Expression (Before GROUP BY)
+                  │  I/O: rows 89.74 thousand → 89.74 thousand · 717.91 KB → 717.91 KB
+                  │    time 500.00 ns (0.0%) · parallelism 0.92/1
+                  └──Expression ((WHERE + Change column names to column identifiers))
+                     │  I/O: rows 89.74 thousand → 89.74 thousand · 717.91 KB → 717.91 KB
+                     │    time 1.63 us (0.0%) · parallelism 0.92/1
+                     └──ReadFromMergeTree (clickliv.minute_occupancy)
+                           Read type: Default
+                           Parts: 1 | Granules: 11
+                           Output: minute, sessions
+                           Prewhere filter
+                           Prewhere filter column:  country = coalesce(NULL, country) AND platform = coalesce(NULL, platform) AND video_type = coalesce(NULL, video_type) AND minute <= 29751090 AND minute >= 29750410 AND content_id = coalesce(NULL, content_id)
+                           Indexes:
+                             Min-Max
+                               Keys:
+                                 minute
+                               Condition: and((minute in (-Inf, 29751090]), (minute in [29750410, +Inf)))
+                               Parts: 1/1
+                               Granules: 11/11
+                             Partition
+                               Condition: true
+                               Parts: 1/1
+                               Granules: 11/11
+                             PrimaryKey
+                               Keys:
+                                 minute
+                               Condition: and((minute in (-Inf, 29751090]), (minute in [29750410, +Inf)))
+                               Parts: 1/1
+                               Granules: 11/11
+                               Search Algorithm: generic exclusion search
+                             Ranges: 1
+                           I/O: rows 0 → 89.74 thousand · 0 B → 717.91 KB
+                             time 2.97 ms (86.9%) · parallelism 1.00/1
