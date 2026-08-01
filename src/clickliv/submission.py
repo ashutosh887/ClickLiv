@@ -198,6 +198,15 @@ def run(ch: ClickHouse, artifacts: Path, submission_dir: Path = Path("submission
         indent=2) + "\n")
 
     latencies = sample_latencies(ch, samples)
+    if not latencies:
+        (evidence_dir / "serving_slo.txt").write_text(
+            "-- O6b: serving SLO\nno sample was recoverable from system.query_log on this\n"
+            "server, so no latency is reported rather than a guessed one. The answers\n"
+            "above are unaffected.\n")
+        print(f"{submission_dir}/benchmark_answers.csv    {len(rows)} rows")
+        print(f"{evidence_dir}/serving_slo.txt          no query_log samples recovered")
+        return True
+
     durations = [float(r["query_duration_ms"]) for r in latencies]
     percentiles = {
         "min": min(durations), "max": max(durations),

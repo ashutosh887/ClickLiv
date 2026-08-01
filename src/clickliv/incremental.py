@@ -13,7 +13,7 @@ def escape(value: str) -> str:
     return value.replace("'", "''")
 
 
-def pick_open_session(ch: ClickHouse) -> dict:
+def pick_open_session(ch: ClickHouse) -> dict | None:
     row = ch.query("""
         SELECT video_session_id, argMax(segment_start_ms, version) AS segment_start_ms,
                argMax(last_active_ms, version) AS last_active_ms
@@ -22,9 +22,7 @@ def pick_open_session(ch: ClickHouse) -> dict:
         ORDER BY video_session_id
         LIMIT 1
     """).dicts()
-    if not row:
-        raise SystemExit("no open sessions found; open_session_state is empty")
-    return row[0]
+    return row[0] if row else None
 
 
 def dims_for(ch: ClickHouse, session_id: str) -> dict:
@@ -77,6 +75,18 @@ def run(ch: ClickHouse, evidence: Path) -> bool:
     cli.run_sql_file(ch, "08_incremental.sql")
 
     before = pick_open_session(ch)
+    if before is None:
+        (evidence / "incremental_update.txt").write_text(
+            "-- update handling: an open session absorbs a new heartbeat live\n\n"
+            "this dataset ends with every session already closed, so open_session_state\n"
+            "seeded empty and there was nothing to extend. The incremental path is still\n"
+            "installed and would fire on the next heartbeat for any session that is open\n"
+            "when the data ends; see sql/08_incremental.sql.\n")
+        print("evidence/incremental_update.txt   no open sessions in this dataset")
+        ch.command("DROP VIEW IF EXISTS mv_extend_open_session")
+        ch.command("DROP TABLE IF EXISTS open_session_state")
+        return True
+
     session_id = before["video_session_id"]
     dims = dims_for(ch, session_id)
 

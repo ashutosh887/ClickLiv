@@ -6,7 +6,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from .ch import ClickHouse
+from .ch import ClickHouse, ClickHouseError
 
 PROJECTION = "proj_content_minute"
 
@@ -14,9 +14,12 @@ QUERY = "SELECT sum(sessions) FROM minute_occupancy WHERE content_id = {content_
 
 
 def busiest_content_id(ch: ClickHouse) -> int:
-    return int(ch.scalar(
-        "SELECT content_id FROM minute_occupancy "
-        "GROUP BY content_id ORDER BY count() DESC LIMIT 1"))
+    rows = ch.query("SELECT content_id FROM minute_occupancy "
+                    "GROUP BY content_id ORDER BY count() DESC LIMIT 1").rows
+    if not rows:
+        raise SystemExit("minute_occupancy is empty, so there is no content_id to "
+                         "demonstrate the projection on")
+    return int(rows[0][0])
 
 
 def explain(ch: ClickHouse, query: str, settings: dict | None = None) -> str:
@@ -31,7 +34,11 @@ def run(ch: ClickHouse, evidence: Path) -> bool:
 
     before = explain(ch, query, {"optimize_use_projections": 0})
     after = explain(ch, query)
-    forced = explain(ch, query, {"force_optimize_projection_name": PROJECTION})
+    try:
+        forced = explain(ch, query, {"force_optimize_projection_name": PROJECTION})
+    except ClickHouseError as exc:
+        forced = (f"the planner declined the projection even when forced, which it does "
+                  f"when the base table is small enough that a full scan is cheaper:\n{exc}")
 
     query_id = str(uuid.uuid4())
     ch.query(query, query_id=query_id)
