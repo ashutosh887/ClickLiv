@@ -26,12 +26,8 @@ DEFAULTS = {
 PIPELINE = ("schema", "load", "sessionize", "occupancy", "deltas")
 
 
-def load_dotenv(path: str | None = None) -> None:
-    """Reads CLICKLIV_ENV_FILE if set, else .env. Lets one clone run against local
-    Docker (default) or Cloud (CLICKLIV_ENV_FILE=.env.cloud) without ever overwriting
-    either file, so both stay live at once (D22, extended for a real Cloud service).
-    """
-    p = Path(path or os.environ.get("CLICKLIV_ENV_FILE", ".env"))
+def load_dotenv(path: str = ".env") -> None:
+    p = Path(path)
     if p.exists():
         for line in p.read_text().splitlines():
             line = line.strip()

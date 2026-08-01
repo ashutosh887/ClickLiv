@@ -3,7 +3,6 @@ localdocs/
 artifacts/
 .env
 .env.local
-.env.cloud
 .clickhouse/
 .DS_Store
 __pycache__/

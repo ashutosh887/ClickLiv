@@ -66,23 +66,16 @@ make decline     # optional: deterministic concurrency-decline alerting
 make incremental # a real open session absorbs a new heartbeat live, proven vs batch
 ```
 
-`make all` runs CSV to Gate A in about 8 seconds against local Docker. Every command runs
-unchanged against ClickHouse Cloud, the submission's actual requirement ("load the data
-into your team's own ClickHouse Cloud service, there is no shared instance"), by pointing
-at a second env file instead of overwriting the first:
+`make all` runs CSV to Gate A in about 8 seconds. Every command runs unchanged against
+ClickHouse Cloud, the submission's actual requirement ("load the data into your team's
+own ClickHouse Cloud service, there is no shared instance"): `.env` holds one active
+target at a time, Cloud or local Docker, the other block commented out (see
+`.env.example`). `.env` here is currently pointed at the real Cloud service.
 
-```sh
-cp .env.cloud.example .env.cloud   # fill in the real service host/user/password
-CLICKLIV_ENV_FILE=.env.cloud make all
-CLICKLIV_ENV_FILE=.env.cloud make gate-b
-```
-
-Both `.env` and `.env.cloud` stay live at once; nothing overwrites either. Verified
-end to end against a real Cloud service (Mumbai, `ap-south-1`, 2 replicas): Gate A
-12/12, Gate B byte-identical hashes to local, marts, answers, projections, scale,
-userlevel, crossover, decline and incremental all pass, matching local numbers
-exactly. Three real, Cloud-specific differences found and fixed while proving that,
-not assumed away:
+Verified end to end against it (Mumbai, `ap-south-1`, 2 replicas): Gate A 12/12, Gate B
+byte-identical hashes to local, marts, answers, projections, scale, userlevel,
+crossover, decline and incremental all pass, matching local numbers exactly. Three
+real, Cloud-specific differences found and fixed while proving that, not assumed away:
 
 - **A multi-replica read-after-write race.** A plain `SYSTEM RELOAD DICTIONARY` or
   `SYSTEM FLUSH LOGS` only reaches whichever replica handled that one HTTP request; a
