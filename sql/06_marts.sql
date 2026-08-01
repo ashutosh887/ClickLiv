@@ -14,6 +14,11 @@ CREATE DATABASE marts;
 -- None of them collide with a real value (india, live, vod, the platform names), so the
 -- semantics for real values are untouched.
 --
+-- Real values match case-insensitively for the same reason. A model asked to compare live
+-- against vod writes 'LIVE' and 'VOD', which used to match nothing and came back as a
+-- confident zero rather than an error. The dimensions have no two values that differ only
+-- by case, so folding case cannot merge two distinct slices.
+--
 -- SQL SECURITY DEFINER: marts_agent is granted SELECT on marts.* only, never on
 -- clickliv.minute_occupancy directly. Without DEFINER a view runs with the invoker's
 -- own privileges, and ClickHouse checks those against the underlying table, which
@@ -30,9 +35,9 @@ COMMENT 'Parameterized. Call as marts.v_occupancy_minute(country=..., platform=.
 AS
 SELECT minute, sum(sessions) AS concurrency
 FROM minute_occupancy
-WHERE country      = if(lower(trimBoth({country:String}))    IN ('', 'all', 'any', 'none', 'null', '*', '%'), country,    {country:String})
-  AND platform     = if(lower(trimBoth({platform:String}))   IN ('', 'all', 'any', 'none', 'null', '*', '%'), platform,   {platform:String})
-  AND video_type   = if(lower(trimBoth({video_type:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%'), video_type, {video_type:String})
+WHERE (lower(trimBoth({country:String}))    IN ('', 'all', 'any', 'none', 'null', '*', '%') OR lower(country)    = lower(trimBoth({country:String})))
+  AND (lower(trimBoth({platform:String}))   IN ('', 'all', 'any', 'none', 'null', '*', '%') OR lower(platform)   = lower(trimBoth({platform:String})))
+  AND (lower(trimBoth({video_type:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR lower(video_type) = lower(trimBoth({video_type:String})))
   AND content_id   = coalesce(nullIf({content_id:UInt64}, toUInt64(0)), content_id)
   AND minute BETWEEN {minute_from:UInt32} AND {minute_to:UInt32}
 GROUP BY minute
@@ -119,6 +124,40 @@ SELECT * FROM (
     FROM minute_occupancy GROUP BY video_type
 )
 ORDER BY dimension, value;
+
+-- Titles, so "how many watched X at its peak" resolves to a content_id instead of
+-- quietly falling through to the unfiltered total. Only ids that carry sessions are
+-- listed, so an empty match means the dataset does not hold that title, which is an
+-- answer in itself.
+CREATE VIEW marts.v_titles
+(
+    `content_id`      UInt64 COMMENT 'Pass this as the content_id parameter of marts.v_occupancy_minute or marts.v_concurrency.',
+    `title`           String COMMENT 'Title from the content catalogue. Empty when the catalogue has no row for the id.',
+    `video_type`      String COMMENT 'live or vod, as the catalogue records it.',
+    `category`        String COMMENT 'Catalogue category.',
+    `minutes_present` UInt64 COMMENT 'Distinct minutes in which this title carries at least one session.',
+    `first_minute`    UInt32 COMMENT 'First minute this title appears, in minutes since the unix epoch.',
+    `last_minute`     UInt32 COMMENT 'Last minute this title appears, in minutes since the unix epoch.'
+)
+DEFINER = ${CH_USER} SQL SECURITY DEFINER
+COMMENT 'Every content_id that carries sessions, with its title. Match a title here first, case insensitively or by substring, then pass the content_id you found. If nothing matches, the dataset does not contain that title; say so rather than answering with the unfiltered total.'
+AS
+SELECT
+    seen.content_id                       AS content_id,
+    toString(catalogue.title)             AS title,
+    toString(catalogue.video_type)        AS video_type,
+    toString(catalogue.category)          AS category,
+    seen.minutes_present                  AS minutes_present,
+    seen.first_minute                     AS first_minute,
+    seen.last_minute                      AS last_minute
+FROM
+(
+    SELECT content_id, uniqExact(minute) AS minutes_present,
+           min(minute) AS first_minute, max(minute) AS last_minute
+    FROM minute_occupancy GROUP BY content_id
+) AS seen
+LEFT JOIN content_meta AS catalogue ON catalogue.content_id = seen.content_id
+ORDER BY minutes_present DESC, content_id;
 
 -- The MCP or dashboard surface. Everything upstream of marts is ungranted.
 CREATE ROLE IF NOT EXISTS marts_readonly;

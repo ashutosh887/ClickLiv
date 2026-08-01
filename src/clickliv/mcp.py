@@ -80,16 +80,20 @@ def reject_unknown(arguments: dict, allowed: tuple[str, ...]) -> None:
 
 def enum_argument(arguments: dict, name: str) -> str:
     """Filters come from a vetted allowlist, so a hallucinated value is rejected, not queried.
-    The sentinels a model reaches for when it means no filter collapse to no filter."""
+    Matching folds case and the sentinels a model reaches for collapse to no filter."""
     value = arguments.get(name)
     if value is None:
         return ""
-    if isinstance(value, str) and value.strip().lower() in NO_FILTER:
+    if not isinstance(value, str):
+        raise ToolError(f"{name} must be a string, got {value!r}")
+    needle = value.strip().lower()
+    if needle in NO_FILTER:
         return ""
-    if not isinstance(value, str) or value not in DIMENSIONS[name]:
+    canonical = next((known for known in DIMENSIONS[name] if known.lower() == needle), None)
+    if canonical is None:
         raise ToolError(f"{name} must be one of {', '.join(DIMENSIONS[name])}, or left out "
                         f"for no filter, got {value!r}")
-    return value
+    return canonical
 
 
 def integer_argument(arguments: dict, name: str, default: int, low: int, high: int) -> int:
