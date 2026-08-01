@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import json
 import os
 import re
 import sys
@@ -397,6 +399,52 @@ def step_replay(ch: ClickHouse) -> int:
     return 0
 
 
+REFERENCE_KEYS = ("sessions", "segments", "session_minutes", "minutes_with_activity",
+                  "peak_concurrency", "peak_minute", "instantaneous_peak",
+                  "average_over_active_minutes")
+
+
+def figure(value) -> str:
+    if isinstance(value, float):
+        return f"{value:,.4f}"
+    return f"{value:,}" if isinstance(value, int) else str(value)
+
+
+def benchmarks_by_label(path: Path) -> dict[str, dict]:
+    if not path.exists():
+        return {}
+    with path.open(newline="") as fh:
+        return {row["query_label"]: row for row in csv.DictReader(fh)}
+
+
+def comparison(root: Path) -> Path:
+    """The new numbers beside the committed tuning numbers, same names, same order, same
+    units, so the README table is a copy and paste rather than a re-derivation."""
+    def reference(base: Path) -> dict:
+        path = base / "reference.json"
+        return json.loads(path.read_text()) if path.exists() else {}
+
+    tuning, sealed = reference(Path("artifacts")), reference(root / "artifacts")
+    old = benchmarks_by_label(Path("answers/benchmark_answers.csv"))
+    new = benchmarks_by_label(root / "answers/benchmark_answers.csv")
+
+    lines = ["| metric | tuning data | sealed data |", "| --- | --- | --- |"]
+    for key in REFERENCE_KEYS:
+        lines.append(f"| {key.replace('_', ' ')} | {figure(tuning.get(key, ''))} "
+                     f"| {figure(sealed.get(key, ''))} |")
+    for label, row in new.items():
+        was = old.get(label, {})
+        lines.append(f"| {label} peak | {was.get('peak_concurrency', '')} "
+                     f"| {row['peak_concurrency']} |")
+        lines.append(f"| {label} average | {was.get('average_concurrency', '')} "
+                     f"| {row['average_concurrency']} |")
+
+    out = root / "answers" / "comparison.md"
+    out.write_text("\n".join(lines) + "\n")
+    print("\n".join(lines))
+    return out
+
+
 def step_unseen(ch: ClickHouse) -> int:
     """The sealed-dataset run: a fresh pair of CSVs to answers, latencies and evidence,
     in one command, into an output root of its own."""
@@ -427,6 +475,9 @@ def step_unseen(ch: ClickHouse) -> int:
                   f"the tables this run replaced are still in {ch.config.database} under "
                   f"__prev. Restore them with: make rollback")
             return status
+
+    print(f"\n===== the same metrics as the tuning run, in the same order =====")
+    comparison(root)
 
     print(f"\n===== produced in {time.time() - started:.0f}s =====")
     for path in sorted(p for p in root.rglob("*") if p.is_file()):

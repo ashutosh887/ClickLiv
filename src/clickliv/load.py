@@ -206,7 +206,7 @@ class Shape:
 
     def describe(self, types: dict[str, str]) -> str:
         extra = [name for name in self.header if name not in types]
-        return (f"{self.path.name:<34}{len(self.header)} columns"
+        return (f"{self.path.name:<34} {len(self.header)} columns"
                 f"{'' if self.delimiter == ',' else f', delimiter {self.delimiter!r}'}"
                 f"{', gzip' if self.gzipped else ''}"
                 f"{'' if not extra else f', ignoring {len(extra)} extra: ' + ', '.join(extra)}")
