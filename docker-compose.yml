@@ -38,9 +38,162 @@ services:
       - hdx-data:/var/lib/clickhouse
       - hdx-logs:/var/log/clickhouse-server
 
+  langfuse-redis:
+    image: redis:7-alpine
+    container_name: clickliv-lf-redis
+    profiles: ["llm"]
+    command: ["redis-server", "--requirepass", "${LANGFUSE_REDIS_AUTH}", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${LANGFUSE_REDIS_AUTH}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # Both of Langfuse's databases are ClickHouse products: traces go to our own
+  # ClickHouse Cloud service (database langfuse) and its transactional store is
+  # ClickHouse managed Postgres in ap-south-1. Only Redis stays local.
+  langfuse-worker:
+    image: langfuse/langfuse-worker:4.1.0
+    container_name: clickliv-lf-worker
+    profiles: ["llm"]
+    depends_on:
+      langfuse-redis:
+        condition: service_healthy
+    environment: &langfuse-env
+      DATABASE_URL: ${LANGFUSE_DATABASE_URL}
+      SALT: ${LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
+      REDIS_CONNECTION_STRING: redis://default:${LANGFUSE_REDIS_AUTH}@langfuse-redis:6379
+      CLICKHOUSE_URL: https://${CH_HOST}:8443
+      CLICKHOUSE_MIGRATION_URL: clickhouse://${CH_HOST}:9440
+      CLICKHOUSE_MIGRATION_SSL: "true"
+      CLICKHOUSE_USER: ${CH_USER}
+      CLICKHOUSE_PASSWORD: ${CH_PASSWORD}
+      CLICKHOUSE_DB: langfuse
+      CLICKHOUSE_CLUSTER_ENABLED: ${LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED:-true}
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: ${LANGFUSE_S3_BUCKET}
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: ${LANGFUSE_S3_REGION}
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_S3_KEY}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_S3_SECRET}
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_MIGRATION_V4_NATIVE_OTEL_BEHAVIOUR: dual_write
+      LANGFUSE_MIGRATION_V4_WRITE_MODE: dual
+      TELEMETRY_ENABLED: "false"
+
+  langfuse-web:
+    image: langfuse/langfuse:4.1.0
+    container_name: clickliv-lf-web
+    profiles: ["llm"]
+    depends_on:
+      langfuse-worker:
+        condition: service_started
+    ports:
+      - "3300:3000"
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_URL: ${LANGFUSE_HOST}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
+      LANGFUSE_INIT_ORG_ID: devsapiens
+      LANGFUSE_INIT_ORG_NAME: DevSapiens
+      LANGFUSE_INIT_PROJECT_ID: clickliv
+      LANGFUSE_INIT_PROJECT_NAME: ClickLiv
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL}
+      LANGFUSE_INIT_USER_NAME: Ashutosh
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD}
+
+  librechat-mongo:
+    image: mongo:8
+    container_name: clickliv-lc-mongo
+    profiles: ["chat"]
+    command: ["mongod", "--noauth", "--wiredTigerCacheSizeGB", "0.25"]
+    volumes:
+      - lc-mongo:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # The official ClickHouse MCP server runs as its own container over HTTP rather
+  # than as a stdio child of LibreChat: the image is pinned, /health is curlable,
+  # and the Cloud password stays in one process instead of every chat session.
+  clickhouse-mcp:
+    image: ghcr.io/clickhouse/mcp-clickhouse:0.4.1
+    container_name: clickliv-ch-mcp
+    profiles: ["chat"]
+    ports:
+      - "127.0.0.1:8766:8000"
+    environment:
+      CLICKHOUSE_HOST: ${CH_HOST}
+      CLICKHOUSE_PORT: ${CH_PORT}
+      CLICKHOUSE_USER: ${CH_USER}
+      CLICKHOUSE_PASSWORD: ${CH_PASSWORD}
+      CLICKHOUSE_DATABASE: ${CH_DATABASE}
+      CLICKHOUSE_SECURE: "true"
+      CLICKHOUSE_ALLOW_WRITE_ACCESS: "false"
+      CLICKHOUSE_ALLOW_DROP: "false"
+      CLICKHOUSE_MCP_SERVER_TRANSPORT: http
+      CLICKHOUSE_MCP_BIND_HOST: 0.0.0.0
+      CLICKHOUSE_MCP_BIND_PORT: "8000"
+      CLICKHOUSE_MCP_AUTH_DISABLED: "true"
+      CHDB_ENABLED: "false"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 120s
+      start_interval: 3s
+      start_period: 60s
+      timeout: 10s
+      retries: 3
+
+  # Meilisearch and the RAG API are the two optional LibreChat sidecars and both
+  # are left out: neither is needed to chat over MCP and Docker has 8 GB total.
+  librechat:
+    image: ghcr.io/danny-avila/librechat:v0.8.7
+    container_name: clickliv-librechat
+    profiles: ["chat"]
+    depends_on:
+      librechat-mongo:
+        condition: service_healthy
+      clickhouse-mcp:
+        condition: service_healthy
+    ports:
+      - "3080:3080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./docker/librechat.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3080"
+      MONGO_URI: mongodb://librechat-mongo:27017/LibreChat
+      DOMAIN_CLIENT: http://localhost:3080
+      DOMAIN_SERVER: http://localhost:3080
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODELS: ${OPENAI_MODEL}
+      ALLOW_EMAIL_LOGIN: "true"
+      ALLOW_REGISTRATION: "true"
+      ALLOW_SOCIAL_LOGIN: "false"
+      SEARCH: "false"
+      NO_INDEX: "true"
+      TRUST_PROXY: "0"
+    volumes:
+      - ./docker/librechat.yaml:/app/librechat.yaml:ro
+      - lc-uploads:/app/uploads
+      - lc-images:/app/client/public/images
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
 volumes:
   ch-data:
   ch-logs:
   hdx-db:
   hdx-data:
   hdx-logs:
+  lc-mongo:
+  lc-uploads:
+  lc-images:
