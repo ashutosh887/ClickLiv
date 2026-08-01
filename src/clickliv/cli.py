@@ -163,6 +163,13 @@ def step_answers(ch: ClickHouse) -> int:
     return 0 if answers.run(ch, artifacts_dir()) else 1
 
 
+def step_projections(ch: ClickHouse) -> int:
+    from . import projections
+    run_sql_file(ch, "07_projections.sql")
+    Path("evidence").mkdir(exist_ok=True)
+    return 0 if projections.run(ch, Path("evidence")) else 1
+
+
 def step_obs(ch: ClickHouse) -> int:
     from . import observe
     return observe.report()
@@ -198,6 +205,7 @@ STEPS = {
     "chdb": step_chdb,
     "marts": step_marts,
     "answers": step_answers,
+    "projections": step_projections,
     "obs": step_obs,
     "reset": step_reset,
 }
