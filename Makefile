@@ -2,7 +2,7 @@ CLI := uv run --quiet python -m clickliv
 
 .PHONY: up down logs obs obs-up obs-down obs-logs ping schema load reconcile \
         sessionize occupancy deltas reference verify pipeline all gate-b gate-c \
-        sweep chdb marts answers projections scale ui userlevel reset
+        sweep chdb marts answers projections scale ui userlevel crossover decline reset
 
 up:
 	docker compose up -d --wait
@@ -87,6 +87,12 @@ ui:
 
 userlevel:
 	$(CLI) userlevel
+
+crossover:
+	$(CLI) crossover
+
+decline:
+	$(CLI) decline
 
 reset:
 	$(CLI) reset

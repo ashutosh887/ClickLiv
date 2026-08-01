@@ -200,6 +200,18 @@ def step_userlevel(ch: ClickHouse) -> int:
     return 0 if userlevel.run(ch, Path("evidence")) else 1
 
 
+def step_crossover(ch: ClickHouse) -> int:
+    from . import crossover
+    Path("evidence").mkdir(exist_ok=True)
+    return 0 if crossover.run(ch, Path("evidence")) else 1
+
+
+def step_decline(ch: ClickHouse) -> int:
+    from . import decline
+    Path("evidence").mkdir(exist_ok=True)
+    return 0 if decline.run(ch, Path("evidence")) else 1
+
+
 def step_obs(ch: ClickHouse) -> int:
     from . import observe
     return observe.report()
@@ -240,6 +252,8 @@ STEPS = {
     "scale": step_scale,
     "ui": step_ui,
     "userlevel": step_userlevel,
+    "crossover": step_crossover,
+    "decline": step_decline,
     "obs": step_obs,
     "reset": step_reset,
 }

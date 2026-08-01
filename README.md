@@ -61,6 +61,8 @@ make chdb        # same SQL in-process on chDB, no server at all
 make gate-c      # held-out single-day dry run, evidence in answers/gate_c and evidence/gate_c
 make scale       # O7: sharding and read-cost proofs at 1x/10x/100x, evidence/scale.txt
 make userlevel   # O4: session-level vs user-level concurrency, evidence/user_level.txt
+make crossover   # the problem statement's own dimension-crossover example, measured
+make decline     # optional: deterministic concurrency-decline alerting
 ```
 
 `make all` runs CSV to Gate A in about 8 seconds. The same commands run unchanged against
@@ -299,6 +301,25 @@ session-minute grain is structural and does not erode as the table grows; under 
 growth, where sessions gain more events rather than being cloned wholesale, the serving
 table grows slower than raw events and this ratio would widen further.
 
+## Dimension crossover and decline alerting
+
+The problem statement gives its own worked example: "platform and a content might
+peak at one minute, while platform + country might reach its peak at an entirely
+different minute." `make crossover` reproduces it with real numbers through
+`marts.v_concurrency`, the served surface, not a hand-picked illustration:
+`evidence/dimension_crossover.txt` shows 4 distinct peak minutes across 5 real
+slices. D6 (filter, sum across excluded dims, then max over minutes, never max
+first) is why the served view gets this right automatically.
+
+Decline alerting is called out as explicitly optional, "an LLM & ClickStack
+use-case," for concurrency dropping because an asset ended, a system issue, or
+disengaging content. `make decline` builds it deterministic instead: a
+minute-over-minute drop threshold read from `marts.v_occupancy_minute`, not an LLM
+call. The problem statement itself says AI is not required for the core, and this
+sits adjacent to the core, not inside it, so a threshold rule is the right scope.
+One real event exists in the tuning data: 214 to 7 sessions, a 96.7% drop, found by
+the rule rather than manufactured. `evidence/decline_alerts.txt`.
+
 ## Session-level or user-level concurrency
 
 The data dictionary says user-level concurrency can be derived from `user_id`. The
@@ -429,6 +450,8 @@ src/clickliv/gate_c.py       Gate C, the held-out single-day dry run
 src/clickliv/scale.py        O7, the sharding and read-cost proofs at scale
 src/clickliv/ui.py           the minimal concurrency dashboard
 src/clickliv/userlevel.py    O4, session-level vs user-level concurrency, measured
+src/clickliv/crossover.py    the problem statement's dimension-crossover example
+src/clickliv/decline.py      optional: deterministic concurrency-decline alerting
 src/clickliv/cli.py          command dispatch, identical for local and Cloud
 src/clickliv/ch.py           zero-dependency ClickHouse HTTP client
 src/clickliv/load.py         CSV ingestion, content before events
