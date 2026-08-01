@@ -3,8 +3,8 @@ CLI := uv run --quiet python -m clickliv
 .PHONY: up down logs obs obs-up obs-down obs-logs ping schema load reconcile \
         sessionize occupancy deltas reference verify pipeline all gate-b gate-c \
         sweep chdb marts answers projections scale ui userlevel crossover decline \
-        incremental instantaneous submission replay unseen unseen-fixture mcp test data \
-        fixture fixture-pipeline reset \
+        incremental instantaneous submission replay unseen unseen-fixture unseen-variants \
+        preflight rollback mcp test data fixture fixture-pipeline reset \
         llm-up llm-down llm-logs chat-up chat-down chat-logs
 
 up:
@@ -112,14 +112,31 @@ replay:
 # The sealed-dataset run. See docs/unseen-day.md.
 unseen:
 	@test -n "$(RAW)" -a -n "$(CONTENT)" || { \
-	  echo "usage: make unseen RAW=<events csv> CONTENT=<content csv> [OUT=unseen] [DB=<database>]"; \
+	  echo "usage: make unseen RAW=<events csv> CONTENT=<content csv> [OUT=unseen] [DB=<database>] [CSV_RENAME=theirs=ours,...]"; \
 	  exit 2; }
 	RAW_CSV="$(RAW)" CONTENT_CSV="$(CONTENT)" \
 	UNSEEN_DIR="$(if $(OUT),$(OUT),unseen)" \
+	$(if $(CSV_RENAME),CSV_RENAME="$(CSV_RENAME)",) \
 	$(if $(DB),CH_DATABASE="$(DB)",) $(CLI) unseen
+
+# Read only. Everything checkable about a new pair of files, before anything is dropped.
+preflight:
+	@test -n "$(RAW)" -a -n "$(CONTENT)" || { \
+	  echo "usage: make preflight RAW=<events csv> CONTENT=<content csv> [CSV_RENAME=theirs=ours,...]"; \
+	  exit 2; }
+	RAW_CSV="$(RAW)" CONTENT_CSV="$(CONTENT)" \
+	$(if $(CSV_RENAME),CSV_RENAME="$(CSV_RENAME)",) \
+	$(if $(DB),CH_DATABASE="$(DB)",) $(CLI) preflight
+
+rollback:
+	$(if $(DB),CH_DATABASE="$(DB)",) $(CLI) rollback
 
 unseen-fixture:
 	uv run --quiet python tools/make_unseen_fixture.py
+
+# The same fresh day in every container and CSV quirk the organizers might ship.
+unseen-variants:
+	uv run --quiet python tools/make_unseen_fixture.py --variants $(if $(DIR),$(DIR),fixtures/variants)
 
 mcp:
 	$(CLI) mcp

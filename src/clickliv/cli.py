@@ -32,9 +32,12 @@ SERVERS = ("mcp", "ui")
 REPLAY = ("reset", "schema", "load", "sessionize", "occupancy", "deltas", "reference",
           "verify", "marts", "projections", "answers", "instantaneous", "submission")
 
-UNSEEN = ("reset", "schema", "load", "sessionize", "occupancy", "deltas", "reference",
-          "verify", "incremental", "marts", "projections", "answers", "instantaneous",
-          "submission")
+UNSEEN = ("preflight", "snapshot", "reset", "schema", "load", "sessionize", "occupancy",
+          "deltas", "reference", "verify", "incremental", "marts", "projections",
+          "answers", "instantaneous", "submission")
+
+SERVING_TABLES = ("raw_events", "content_meta", "active_intervals", "session_minutes",
+                  "minute_occupancy", "minute_deltas")
 
 UNSEEN_ROOTS = (("ARTIFACTS", "artifacts"), ("ANSWERS", "answers"),
                 ("EVIDENCE", "evidence"), ("SUBMISSION", "submission"))
@@ -320,6 +323,67 @@ def step_submission(ch: ClickHouse) -> int:
                                evidence_dir()) else 1
 
 
+def table_exists(ch: ClickHouse, table: str) -> bool:
+    return bool(int(ch.scalar(
+        f"SELECT count() FROM system.tables WHERE database = '{ch.config.database}' "
+        f"AND name = '{table}'")))
+
+
+def step_preflight(ch: ClickHouse) -> int:
+    """Read only. Everything wrong with the new files is found here, while the tables the
+    demo is serving are still up."""
+    from . import load as loader
+    from .ch import ClickHouseError
+
+    ok = loader.preflight()
+    try:
+        for table in ("raw_events", "minute_occupancy"):
+            if table_exists(ch, table):
+                rows = int(ch.scalar(f"SELECT count() FROM {table}"))
+                print(f"{ch.config.database}.{table} holds {rows:,} rows right now, "
+                      f"and this run replaces them")
+    except ClickHouseError:
+        pass
+    return 0 if ok else 1
+
+
+def step_snapshot(ch: ClickHouse) -> int:
+    """Move the serving tables aside instead of dropping them, so a run that dies midway
+    is one make rollback away from the demo it was replacing."""
+    ch.command("DROP DICTIONARY IF EXISTS content_dict")
+    ch.command("DROP VIEW IF EXISTS mv_extend_open_session")
+    moved = []
+    for table in SERVING_TABLES:
+        if not table_exists(ch, table):
+            continue
+        ch.command(f"DROP TABLE IF EXISTS {table}__prev")
+        ch.command(f"RENAME TABLE {table} TO {table}__prev")
+        moved.append(table)
+    print(f"kept aside as __prev: {', '.join(moved) if moved else 'nothing, the database was empty'}")
+    print("make rollback puts them back and rebuilds the serving views")
+    return 0
+
+
+def step_rollback(ch: ClickHouse) -> int:
+    """Put the __prev tables back and rebuild the views over them."""
+    restored = []
+    for table in SERVING_TABLES:
+        if not table_exists(ch, f"{table}__prev"):
+            continue
+        ch.command(f"DROP TABLE IF EXISTS {table}")
+        ch.command(f"RENAME TABLE {table}__prev TO {table}")
+        restored.append(table)
+    if not restored:
+        print(f"no __prev tables in {ch.config.database}, so there is nothing to roll back")
+        return 1
+    run_sql_file(ch, "01_schema.sql")
+    from . import load as loader
+    loader.reload_dictionary_everywhere(ch)
+    status = run_step(ch, "marts")
+    print(f"\nrestored {', '.join(restored)} and rebuilt {marts_database()}")
+    return status
+
+
 def step_replay(ch: ClickHouse) -> int:
     """The graded run: one command from a fresh CSV to a submission bundle."""
     started = time.time()
@@ -358,6 +422,10 @@ def step_unseen(ch: ClickHouse) -> int:
             slo = status
         elif status:
             print(f"\nunseen FAILED at {name}; nothing downstream of it was produced")
+            print("no table was touched, so the demo is still serving what it served "
+                  "before. Fix the input and run it again." if name == "preflight" else
+                  f"the tables this run replaced are still in {ch.config.database} under "
+                  f"__prev. Restore them with: make rollback")
             return status
 
     print(f"\n===== produced in {time.time() - started:.0f}s =====")
@@ -427,6 +495,9 @@ STEPS = {
     "submission": step_submission,
     "replay": step_replay,
     "unseen": step_unseen,
+    "preflight": step_preflight,
+    "snapshot": step_snapshot,
+    "rollback": step_rollback,
     "mcp": step_mcp,
     "obs": step_obs,
     "reset": step_reset,
