@@ -1,0 +1,15 @@
+-- the problem statement's own example, reproduced through marts.v_concurrency
+-- 'platform and a content might peak at one minute, while platform + country
+-- might reach its peak at an entirely different minute'
+
+unfiltered                                 peak  2,692  at minute 29751056
+platform=ANDROID_PHONE                     peak  1,704  at minute 29751056
+video_type=live                            peak    425  at minute 29751042
+platform=ANDROID_PHONE, video_type=live    peak    301  at minute 29751045
+platform=SONY_ANDROID_TV                   peak    279  at minute 29751053
+
+4 distinct peak minutes across 5 slices: peak minute is not fixed across dimension combinations, exactly as the
+problem statement's example says. D6 (filter, sum across excluded dims, then
+max over minutes, never max first) is why marts.v_concurrency gets this right
+automatically: each slice above is a real query against the served view, not
+a hand-picked number.
