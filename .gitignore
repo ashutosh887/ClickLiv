@@ -1,0 +1,12 @@
+data/
+localdocs/
+artifacts/
+.env
+.env.local
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+.next/
+dist/
