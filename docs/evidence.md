@@ -49,12 +49,19 @@ The rest of the evidence directory follows the same rule, one file per proof:
 things nobody upstream specified.
 
 Rather than leave serving latency unstated, the target is ours and stated: p99 under
-100ms. The committed run measures p99 **42ms**, p50 29ms, p95 32ms, min 28ms over 40
+100ms. The committed run measures p99 **58ms**, p95 49ms, p50 41ms, min 34ms over 40
 samples, 8 benchmark queries times 5 repetitions, every one of them server-side
 `query_duration_ms` read from `system.query_log` by `query_id` rather than client wall
-clock. Latency moves a millisecond or two run to run, which is exactly why
-`evidence/serving_slo.txt` carries the percentiles and `evidence/serving_slo.csv`
-carries the per-sample rows: they can be recomputed rather than believed.
+clock.
+
+Those are not the fastest numbers this project has ever measured. An earlier run recorded
+p99 42ms and p50 29ms, and it did not reproduce: two fresh 40-sample runs came back around
+p99 51 to 58ms. Rather than publish the best figure ever seen, the committed evidence is a
+current run, and the claim is the SLO it passes with room rather than a personal best.
+Latency moves run to run on a shared service, which is exactly why
+`evidence/serving_slo.txt` carries the percentiles and `evidence/serving_slo.csv` carries
+the per-sample rows: they can be recomputed rather than believed. Re-run `make submission`
+and expect the numbers to move a few milliseconds.
 
 ## A format-agnostic answer bundle, because no answer format was published (O2)
 

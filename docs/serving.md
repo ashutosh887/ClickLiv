@@ -70,36 +70,65 @@ position ten. A range predicate on the last key column cannot binary
 search; it falls back to generic exclusion search, which on this data meant reading every
 granule of the largest part on every query.
 
-Measured on the Cloud service, through `marts.v_occupancy_minute`, before and after:
+Measured on the Cloud service by rebuilding both layouts from the same 96,818 rows with
+identical codecs and partitioning, and running the same 90-minute window against each:
 
-| 90-minute window | before | after |
+| 90-minute window | dimensions first | `minute` first |
 |---|---|---|
-| granules | 11/11 | 1/11 |
+| granules | 1/17 | 1/17 |
 | search algorithm | generic exclusion search | binary search |
-| rows read | 89,739 | 8,192 |
+| rows read | 3,930 | 3,930 |
 
-Three things are worth stating rather than leaving to be discovered.
+**Read the row that did not move, not the one that did.** At this size partition pruning
+already narrows the query to a single day before the primary key is consulted, so both
+layouts read the same rows and the reorder buys nothing measurable today. What changes is
+the algorithm the index analyzer picks, and that is the whole claim: generic exclusion
+search walks the granules, binary search seeks. The two are indistinguishable when a
+partition holds one granule and diverge as it holds thousands. This is a layout fix
+justified by where it goes, not by what it currently saves, and
+[scale.md](scale.md#the-sort-key-is-the-part-of-this-that-only-matters-at-scale) makes
+that case in full.
 
-**The headline "89,739 rows read to return 91 rows" is not 986x of waste.** Aggregation
-collapses the result, so output rows are the wrong denominator. On the busiest 90-minute
-window 82,699 of those 89,739 rows genuinely match the filter, and the real waste is
-8.5%. That window is where peak concurrency lives, it holds 92% of its partition, and no
-sort key can prune it. The 11x above is from an ordinary off-peak window, which is the
-honest place to measure pruning.
+**Aggregation means output rows are never the denominator.** A live window through
+`marts.v_occupancy_minute` at peak reads 89,964 rows to return 80, which is not 1,124x of
+waste: nearly all of those rows genuinely match the filter and collapse into the
+aggregate. The busiest 90 minutes hold most of their partition and no sort key can prune
+them. Any read-amplification claim in this project is measured against rows that match,
+never against rows returned.
 
 **The cost is storage, not latency.** Leading with `minute` breaks up the runs that made
-the low-cardinality dimensions compress, and the base table grows from 145,654 to 345,636
-bytes on disk, 2.4x. Explicit `ZSTD` on those columns was tried and recovers 5%, so the
-cost is structural rather than a codec mistake. Wall clock does not move: an A/B of the
-two layouts on the same service at the same moment, full scan of all 96,818 rows, is 7 ms
-against 7 ms.
+the low-cardinality dimensions compress. Measured on the Cloud service by building both
+layouts from the same 96,818 rows with identical codecs and partitioning, the compressed
+base table goes from 103,880 to 281,006 bytes, 2.71x. Explicit `ZSTD` on those columns
+was tried and recovers 5%, so the cost is structural rather than a codec mistake. Wall
+clock does not move: an A/B of the two layouts on the same service at the same moment,
+full scan of all 96,818 rows, is 7 ms against 7 ms.
 
-**Two cheaper fixes were tried and rejected on measurement.** A `minmax` skip index on
-`minute`, keeping the old order, eliminates 2 granules of 11, and a `set(0)` index
-eliminates 3, because with `minute` last every granule spans nearly the full time range.
+**Skip indexes were tried at every stage and none of them earned a place.** With the old
+dimensions-first order, a `minmax` index on `minute` eliminates 2 granules of 11 and a
+`set(0)` index eliminates 3, because every granule spans nearly the full time range.
 Leading with `intDiv(minute, 60)` to keep an hour of dimension clustering does not prune
 at all, because `KeyCondition` will not derive a range on `intDiv(minute, 60)` from a
 range on `minute`. Only moving the column works.
+
+They were re-tested against the shipped order too, on a copy of `minute_occupancy`
+carrying three of them at once:
+
+| index | predicate | granules |
+|---|---|---|
+| none | `platform = 'ANDROID_PHONE'` | 17/17 |
+| `set(0)` on `platform` | `platform = 'ANDROID_PHONE'` | 16/17 |
+| none | `content_id = 2078157818` | 17/17 |
+| `minmax` on `content_id` | `content_id = 2078157818` | 16/17 |
+| `bloom_filter(0.01)` on `content_id` | `content_id = 2078157818` | no granules eliminated |
+| `proj_content_minute` | `content_id = 2078157818` | **6/17** |
+
+The arithmetic explains all of it. 96,818 rows over 3,649 minutes is about 26 rows per
+minute, so one 8,192-row granule spans roughly 300 minutes and contains essentially every
+platform and a large share of the content ids. A per-granule summary of a column cannot
+prune when every granule holds every value. Reordering the data can, which is why the
+projection wins by a factor the skip indexes never approach. This project therefore ships
+no skip index, and that is a measurement rather than an omission.
 
 Every dimension is still in the `ORDER BY`, so the `SummingMergeTree` grouping key is the
 same set it always was and no number moves: Gate A stayed 12 of 12, all seven slice peaks
