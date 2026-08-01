@@ -66,8 +66,39 @@ make decline     # optional: deterministic concurrency-decline alerting
 make incremental # a real open session absorbs a new heartbeat live, proven vs batch
 ```
 
-`make all` runs CSV to Gate A in about 8 seconds. The same commands run unchanged against
-ClickHouse Cloud: only `.env` changes.
+`make all` runs CSV to Gate A in about 8 seconds against local Docker. Every command runs
+unchanged against ClickHouse Cloud, the submission's actual requirement ("load the data
+into your team's own ClickHouse Cloud service, there is no shared instance"), by pointing
+at a second env file instead of overwriting the first:
+
+```sh
+cp .env.cloud.example .env.cloud   # fill in the real service host/user/password
+CLICKLIV_ENV_FILE=.env.cloud make all
+CLICKLIV_ENV_FILE=.env.cloud make gate-b
+```
+
+Both `.env` and `.env.cloud` stay live at once; nothing overwrites either. Verified
+end to end against a real Cloud service (Mumbai, `ap-south-1`, 2 replicas): Gate A
+12/12, Gate B byte-identical hashes to local, marts, answers, projections, scale,
+userlevel, crossover, decline and incremental all pass, matching local numbers
+exactly. Three real, Cloud-specific differences found and fixed while proving that,
+not assumed away:
+
+- **A multi-replica read-after-write race.** A plain `SYSTEM RELOAD DICTIONARY` or
+  `SYSTEM FLUSH LOGS` only reaches whichever replica handled that one HTTP request; a
+  follow-up read on a different replica can see stale (or missing) state. Never
+  visible on the single-node local target. Fixed at the source:
+  `SYSTEM RELOAD DICTIONARY ON CLUSTER default` (deterministic, falls back to the
+  plain form where there is no Keeper, i.e. locally) for the content dictionary, and
+  a bounded flush-and-retry helper (`ClickHouse.query_log_rows`) for every
+  `system.query_log` read.
+- **`EXPLAIN ANALYZE` needs ClickHouse 26.7+**, confirmed as a hard version gate, not
+  a config flag: syntax error, not a runtime error, on Cloud's 26.4. `answers.py`
+  degrades gracefully, records why in the evidence file, and every other check is
+  unaffected.
+- **Cloud enforces a password complexity policy** (uppercase + digit + special
+  character) that local Docker does not. `MARTS_PASSWORD` needed a real password, not
+  the local placeholder.
 
 `make chdb` needs no server at all. It builds the entire pipeline inside the Python process
 with chDB and checks it against the served tables:
@@ -497,10 +528,21 @@ src/clickliv/sweep.py        threshold sensitivity grid
 src/clickliv/otel.py         OTLP exporter, spans carry server-side metrics
 src/clickliv/observe.py      reads the trace back out of ClickStack
 docker/                      access-management and ClickStack user overrides
+tests/                       stdlib unittest, zero dependencies, make test
 ```
 
 Thresholds and credentials are `${VAR}` placeholders in the SQL, substituted from the
 environment, which is what lets one set of files serve local, Cloud, and the sweep.
+
+## Tests
+
+`make test`, `python -m unittest discover -s tests`, zero new dependencies. Covers the
+pure, deterministic logic that the four correctness gates never happen to exercise on
+their own: SQL statement splitting, credential redaction, JSONCompact parsing, config
+construction, the Gate B fingerprint comparison, Gate C's day-splitting on a CSV, the
+Bedrock no-op path, and a pin on the exact counts `reconcile()` diffs against. The
+gates are the correctness tests for the pipeline itself; this suite is for the parts
+around it.
 
 ## Licence
 
