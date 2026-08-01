@@ -9,7 +9,7 @@ in the wrong minute.
 
 ## The correctness argument
 
-Four independent paths compute the same number, and a gate diffs them row for row.
+Five independent paths compute the same number, and gates diff them row for row.
 
 ```
 ch-hackathon-raw-data.csv ──▶ raw_events ──▶ active_intervals ──┬──▶ session_minutes ──▶ minute_occupancy
@@ -22,6 +22,7 @@ ch-hackathon-content-data.csv ──▶ content_meta ──▶ content_dict │ 
                                                                      arithmetic oracle
 
 src/clickliv/reference.py reads the CSV directly and owes ClickHouse nothing
+chDB runs 01 through 04 unmodified, in-process, and must land on the same hashes
 ```
 
 Two serving paths that agree is a claim no single path can make. `make verify` proves it:
@@ -51,10 +52,28 @@ make up          # ClickHouse 26.7 in Docker, or point .env at ClickHouse Cloud
 make all         # schema, load, sessionize, both serving paths, reference, Gate A
 make gate-b      # rebuild twice, assert byte-identical serving tables
 make sweep       # threshold sensitivity grid
+make chdb        # same SQL in-process on chDB, no server at all
 ```
 
 `make all` runs CSV to Gate A in about 8 seconds. The same commands run unchanged against
 ClickHouse Cloud: only `.env` changes.
+
+`make chdb` needs no server at all. It builds the entire pipeline inside the Python process
+with chDB and checks it against the served tables:
+
+```
+chDB 26.5.1.1 built the whole pipeline in-process in 2.0s, no server
+server is ClickHouse 26.7.1.1315
+
+PASS  minute_occupancy     96,818 rows  hash 8231330d0e0603ee
+PASS  minute_deltas        33,748 rows  hash 2d7c0e268430f7ee
+PASS  active_intervals     32,164 rows  hash 1f6726b4cec03404
+
+Gate D: PASS  chDB agrees with the server
+```
+
+Same SQL files, two ClickHouse runtimes, two ClickHouse versions, identical hashes. The
+portability is not a claim, it is a target you can run.
 
 ## The active rule
 
