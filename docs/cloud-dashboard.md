@@ -44,8 +44,28 @@ run. Re-check any time with:
 ```
 
 That splits [`sql/09_dashboard.sql`](../sql/09_dashboard.sql) on its `-- name:` labels,
-runs each query against the service from the `default` database, and prints a row count
-per query plus the headline numbers.
+runs each query against the service from the `default` database, prints a row count per
+query plus the full result of every small one, and checks each query against the rule
+below before it runs anything.
+
+### The one thing a tile will not run
+
+A dashboard tile refuses any query where a `FROM` or a `JOIN` is followed by an
+identifier and an argument list. Table functions and parameterized view calls are the
+same shape, and that shape is rejected on the way to the tile rather than by the server,
+so the tile renders **Forbidden** and `system.query_log` holds no trace of the attempt.
+The evidence is in [tile 3](#3-concurrency_over_time) below.
+
+This bites twice. It is why tile 3 reads a plain view instead of
+`marts.v_occupancy_minute(...)`, and it is why tile 6 reads `system.query_log` instead of
+`clusterAllReplicas(default, system.query_log)`. Both were rewritten and both were
+checked against the form they replaced.
+
+The same SQL is fine everywhere else, including the SQL Console query editor. Only the
+tile is fussy, which is worth knowing because a query that runs perfectly in the editor
+can still fail once it is on a dashboard. Subqueries, CTEs, window functions and scalar
+subqueries in the select list are all unaffected, so nothing here had to get simpler,
+only differently shaped.
 
 ## Step 1, save the six queries
 
@@ -144,10 +164,21 @@ ORDER BY minute_utc;
 `marts.v_occupancy_minute(...)` with `minute_from` and `minute_to` read from
 `v_data_window`, which is nicer because it exercises the same path the MCP tools and the
 API use. A console dashboard tile renders it as **Forbidden**. The SQL and the grants are
-both fine: the identical query succeeds for the admin user and for the least privileged
-`marts_agent`, and the console's own user holds a global SELECT. The only structural
-difference is the parameterized view invocation, so the console's dashboard runner
-appears not to permit it. Tiles 1 and 2 read plain views and are unaffected.
+both fine, and this is worth setting out because it is the finding the rest of the page
+leans on:
+
+- The identical query succeeds for the admin `default` user and for the least privileged
+  `marts_agent`, so it is not a grant.
+- The console's own login holds `sql_console_admin`.
+- The same query ran to completion **from the SQL Console query editor**, logged under
+  user `sql-console:ashutoshj887@gmail.com` with `exception_code = 0`. The editor is
+  happy with it. The tile is not.
+- `system.query_log` records no failed attempt from the tile at all, on either replica,
+  so the refusal happens before the request reaches the server.
+
+The only structural difference between this query and the tiles that work is the
+identifier followed by an argument list in `FROM`. That is also what a table function
+looks like, which is why tile 6 had to change too.
 
 The replacement above was checked row for row against the parameterized version: both
 return 3,649 rows and both peak at 2,692 on 2026-07-26 10:56 UTC, and the two result sets
@@ -157,9 +188,15 @@ Expect 3,649 rows. Starts at 1 on 2026-07-14 15:43 UTC, stays low for most of th
 window, climbs to a single sharp spike on 2026-07-26 topping out at **2,692** at 10:56
 UTC, and falls to 7 by 11:30 UTC. If the peak reads 2,692 the tile is correct.
 
-**Visualization type: Area.** x is `ts`, y is `concurrency`. Area over Line here because
-this is one series and the filled shape makes the single sharp spike read from across a
-room. Line is a fine second choice if Area renders badly.
+**Visualization type: Area.** Two columns, one series:
+
+| Column | X | Y | Dimension |
+| --- | --- | --- | --- |
+| `ts` | on | off | off |
+| `concurrency` | off | on | off |
+
+Area over Line here because this is one series and the filled shape makes the single
+sharp spike read from across a room. Line is a fine second choice if Area renders badly.
 
 ### 4. peak_by_platform
 
@@ -184,10 +221,19 @@ XIAOMI_ANDROID_TV 37, LG_HTML_TV 22. One tall bar and a long tail. The ten per-p
 peaks sum to more than 2,692 because platforms peak in different minutes, which is the
 same effect the dashboard is about, one level down.
 
-**Visualization type: Bar Chart.** x is `platform`, y is `peak_concurrency`. Leave
-`peak_at` out of the axes; it stays in the underlying data without being plotted. If the
-ten labels crowd each other at half width, switch to Horizontal bar, which gives the
-platform names room to read.
+**Visualization type: Bar Chart.** Three columns, only two of them plotted:
+
+| Column | X | Y | Dimension |
+| --- | --- | --- | --- |
+| `platform` | on | off | off |
+| `peak_concurrency` | off | on | off |
+| `peak_at` | off | off | off |
+
+`peak_at` stays in the underlying data without being plotted. Dimension is tempting on
+`platform` here and it is still wrong: `platform` is already the x axis, and splitting
+the one measure by it as well asks for ten single-bar series. If the ten labels crowd
+each other at half width, switch to Horizontal bar, which gives the platform names room
+to read.
 
 ### 5. peak_by_video_type
 
@@ -229,6 +275,57 @@ untrue.
 
 ```sql
 SELECT
+    hostName() AS replica,
+    (SELECT count() FROM system.clusters WHERE cluster = 'default') AS replicas_in_service,
+    count() AS queries,
+    quantileExact(0.50)(query_duration_ms) AS p50_ms,
+    quantileExact(0.95)(query_duration_ms) AS p95_ms,
+    quantileExact(0.99)(query_duration_ms) AS p99_ms,
+    max(query_duration_ms) AS max_ms,
+    max(read_rows) AS max_read_rows
+FROM system.query_log
+WHERE type = 'QueryFinish'
+  AND is_initial_query = 1
+  AND query NOT ILIKE '%system.query_log%'
+  AND (query ILIKE '%marts.v_concurrency%' OR query ILIKE '%marts.v_occupancy_minute%');
+```
+
+**This tile used to read `clusterAllReplicas` and it would have failed.** On Cloud the
+query log is per replica, so the honest version pools both, and the only way to pool them
+is the `clusterAllReplicas` table function. That is the exact shape tile 3 proved a tile
+refuses, so it would have rendered Forbidden in front of the judges for reasons that had
+nothing to do with the numbers. It reads the local log instead.
+
+What that costs is small and was measured rather than waved away. The two replicas carry
+the same story: 584 and 596 matching queries, p50 29 ms on both, p95 71 and 72 ms. So a
+single replica is a fair sample, and `replicas_in_service` still puts the size of the
+service on the tile by reading `system.clusters`, which is a plain table.
+
+Expect 1 row with `replicas_in_service = 2`, several hundred queries and rising, p50
+around 29 ms, p95 around 70 ms, p99 between 150 and 350 ms, and `max_ms` under a second.
+
+Two things to know before quoting these. The query count grows every time anyone touches
+the marts views and it counts one replica, so treat it as a floor. And the p99 is not a
+wake-up artefact: the slow tail is the multi-slice comparison queries the agent tools
+issue, which read about 2.5 million rows each and still land under 800 ms. That is the
+better line to say out loud. A median of 29 ms, and the heaviest query in the log reading
+2.5 million rows in under a second.
+
+**Visualization type: Table.** One row, eight columns, no time axis to plot.
+
+If `queries` comes back 0 the query log rotated. Query 3 no longer touches these views,
+so refill the log by asking the chat one question, or loading the Vercel dashboard, or
+running `make answers`, then refresh the tile.
+
+If this tile alone renders Forbidden, delete the `replicas_in_service` line. That leaves
+a bare aggregate over one table with nothing structural left to object to, and the tile
+loses only the replica count.
+
+Pooling both replicas is still the better measurement, so run this form by hand in the
+SQL Console, where table functions are allowed, if a judge asks:
+
+```sql
+SELECT
     uniqExact(hostName()) AS replicas_reporting,
     count() AS queries,
     quantileExact(0.50)(query_duration_ms) AS p50_ms,
@@ -243,21 +340,8 @@ WHERE type = 'QueryFinish'
   AND (query ILIKE '%marts.v_concurrency%' OR query ILIKE '%marts.v_occupancy_minute%');
 ```
 
-Expect 1 row with `replicas_reporting = 2`, a query count in the high hundreds and
-rising, p50 around 27 ms, p95 around 70 ms, p99 under 150 ms.
-
-The query count grows every time anyone touches the marts views, so treat it as a floor
-rather than a fixed number. Two things must hold. `replicas_reporting = 2` proves the
-numbers come off both replicas rather than whichever one the console happened to route
-to, which is why this reads `clusterAllReplicas` instead of `system.query_log` directly.
-And p99 stays comfortably under 200 ms.
-
-**Visualization type: Table.** One row, seven columns, no time axis to plot.
-
-If `replicas_reporting` comes back 1 the service scaled down to a single replica. If
-`queries` comes back 0 the query log rotated. Query 3 no longer touches these views, so
-refill the log by asking the chat one question, or loading the Vercel dashboard, or
-running `make answers`, then refresh the tile.
+Pooled, that reads `replicas_reporting = 2`, 1,180 queries, p50 29 ms, p95 72 ms, p99
+343 ms, max 771 ms. Do not put it on a tile.
 
 ## Step 2, build the dashboard
 
@@ -285,7 +369,7 @@ Add them top to bottom. The order is the argument.
 | 3 | `concurrency_over_time` | Area | x `ts`, y `concurrency` | full | the answer on its own, one clean curve to 2,692 |
 | 4 | `peak_by_platform` | Bar Chart | x `platform`, y `peak_concurrency` | half, left | mobile carries the event |
 | 5 | `peak_by_video_type` | Table | none | half, right | live peaks 20 minutes before vod |
-| 6 | `serving_latency` | Table | none | full | p99 under 150 ms across both replicas |
+| 6 | `serving_latency` | Table | none | full | p50 29 ms, and 2.5 million rows read in under a second |
 
 Tile 2 is the one that has to land. Drag both `foreground_concurrency` and
 `naive_concurrency` onto the y axis so the two series overlay on one pair of axes. If
@@ -298,7 +382,7 @@ Suggested titles, if you want them to read as an argument rather than as column 
 3. Foreground-only concurrency, 2,692 at 10:56 UTC
 4. Where the load came from
 5. Live peaks 20 minutes before vod
-6. Serving latency across both replicas
+6. Serving latency, median 29 ms
 
 The dropdown offers Big Stat, Table, Bar Chart, Stacked bar, Horizontal bar, Stacked H.
 bar, Line, Area, Pie, Doughnut, Scatter and Heatmap. Only the six named above are worth
@@ -345,18 +429,34 @@ The tiles are built to survive a swap of the underlying data in place, so when t
 dataset lands in the same `clickliv` database nothing here has to be rebuilt. Refresh
 the dashboard and the numbers move on their own.
 
-Nothing in any tile names a date, a content id or a dimension value. Tile 3 reads its
-minute range out of `marts.v_data_window` instead of assuming when the data starts and
-ends. Tiles 4, 5 and 7 group by whatever platforms and video types exist rather than
-listing the ones that happened to be in the sample. Tiles 1 and 2 are single selects
-against curated views that recompute from the tables. Tile 6 keys off query text, not
-time.
+This was audited query by query rather than assumed. Nothing in any tile names a date, a
+content id, a platform, a video type or a row count. No tile filters on a time range at
+all, so none of them has a window to get wrong: tile 3 takes every minute that carries
+foreground sessions, whenever those minutes happen to be, which is also why it no longer
+needs `marts.v_data_window`. Tiles 4, 5 and 7 group by whatever platforms and video types
+exist rather than listing the ones that happened to be in the sample, and tile 7 in
+particular builds its slice list from the data, so a new platform appears as a new row on
+its own. Tiles 1 and 2 are single selects against curated views that recompute from the
+tables. Tile 6 keys off query text rather than time, so it survives the swap untouched,
+though the marts rebuild drops and recreates the views and the log will start refilling
+from whatever runs after that.
 
 The one thing that does change is the expected values printed on this page. After a
 swap, run `./scripts/verify_dashboard.sh` and take the numbers it prints as the new
-truth. Row counts, the peak, and the overcount percentage will all differ. What must
-still hold is the shape of the argument: naive above foreground in every minute, the two
-peaks in different minutes, and the `all platforms` row of tile 7 agreeing with tile 1.
+truth. It prints every small result in full for exactly this reason, so tiles 1, 4, 5, 6
+and 7 can be copied straight back onto this page. Row counts, the peak, and the overcount
+percentage will all differ.
+
+What must still hold is the shape of the argument. Naive above foreground in every
+minute, which the script checks and reports as `minutes_naive_below_foreground`, and it
+must read 0. The two peaks in different minutes. The `all platforms` row of tile 7
+agreeing with tile 1. And `minutes_with_foreground` matching the row count of tile 3.
+
+One thing the new data could change that no script will catch. Tile 5 currently reads as
+live peaking 20 minutes before vod, and that ordering is a property of the sample, not a
+law. If the new data reverses it, the tile is still correct and the sentence on this page
+and the suggested title for tile 5 both need rewriting. Read that tile before you say
+anything about it.
 
 ## If a tile renders empty
 
@@ -371,6 +471,12 @@ rebuild drops and recreates the tables and every tile errors for the few seconds
 window is open. This was hit live while writing this page. Wait, refresh, and if the
 tables are back the tiles come back with them. Confirm with `./scripts/verify_dashboard.sh`
 rather than by guessing which of the two it was.
+
+**Forbidden** is a different failure and it is not about the data. It means the query has
+an identifier followed by an argument list in a `FROM` or a `JOIN`, so see [the one thing
+a tile will not run](#the-one-thing-a-tile-will-not-run). Running the query in the SQL
+Console will not reproduce it, because the editor allows what the tile refuses. Copy the
+query from this page again rather than debugging it.
 
 `serving_latency` returning zero rows means the query log rotated. Any other query
 returning zero rows means the pipeline needs a rebuild, in which case see

@@ -22,6 +22,13 @@ ORDER BY minute;
 -- succeeds for both the admin user and marts_agent, so the restriction is the console
 -- runner's rather than ours. Checked row for row: both forms return 3,649 rows peaking
 -- at 2,692 on 2026-07-26 10:56 UTC.
+--
+-- The general rule this establishes, and it binds every query in this file: nothing in
+-- a FROM or JOIN may be an identifier followed by an argument list. A parameterized view
+-- call and a table function are the same shape to whatever parses the query on the way
+-- to a tile, and that shape is refused before the request reaches the server, which is
+-- why system.query_log holds no trace of the failure. Subqueries and CTEs are fine, as
+-- occupancy_vs_instantaneous below relies on. verify_dashboard.sh enforces this.
 SELECT
     minute_utc AS ts,
     foreground_concurrency AS concurrency
@@ -58,15 +65,30 @@ GROUP BY video_type
 ORDER BY peak_concurrency DESC;
 
 -- name: serving_latency
+-- This used to read clusterAllReplicas(default, system.query_log), because on Cloud the
+-- query log is per replica and a plain read sees roughly half the evidence. But
+-- clusterAllReplicas is a table function, which is exactly the shape the tile runner
+-- refuses, so on a dashboard it would have failed the same way the parameterized view
+-- did. Reading the local log is the version that renders.
+--
+-- What that costs and how it is paid back: the latency columns describe whichever
+-- replica the console routed to rather than both, so replicas_in_service comes from
+-- system.clusters, a plain table, to keep the size of the service on the tile. The two
+-- replicas are not meaningfully different, which was measured rather than assumed:
+-- 584 and 596 queries, p50 29 ms on both, p95 71 and 72 ms.
+--
+-- Use the clusterAllReplicas form when running this by hand outside the console, where
+-- table functions are allowed and the pooled numbers are the better ones.
 SELECT
-    uniqExact(hostName()) AS replicas_reporting,
+    hostName() AS replica,
+    (SELECT count() FROM system.clusters WHERE cluster = 'default') AS replicas_in_service,
     count() AS queries,
     quantileExact(0.50)(query_duration_ms) AS p50_ms,
     quantileExact(0.95)(query_duration_ms) AS p95_ms,
     quantileExact(0.99)(query_duration_ms) AS p99_ms,
     max(query_duration_ms) AS max_ms,
     max(read_rows) AS max_read_rows
-FROM clusterAllReplicas(default, system.query_log)
+FROM system.query_log
 WHERE type = 'QueryFinish'
   AND is_initial_query = 1
   AND query NOT ILIKE '%system.query_log%'
