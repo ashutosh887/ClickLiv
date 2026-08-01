@@ -91,8 +91,9 @@ services:
       - "3300:3000"
     environment:
       <<: *langfuse-env
-      NEXTAUTH_URL: ${LANGFUSE_HOST}
+      NEXTAUTH_URL: ${LANGFUSE_PUBLIC_URL:-${LANGFUSE_HOST}}
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
+      AUTH_DISABLE_SIGNUP: "true"
       LANGFUSE_INIT_ORG_ID: devsapiens
       LANGFUSE_INIT_ORG_NAME: DevSapiens
       LANGFUSE_INIT_PROJECT_ID: clickliv
@@ -168,12 +169,12 @@ services:
       HOST: 0.0.0.0
       PORT: "3080"
       MONGO_URI: mongodb://librechat-mongo:27017/LibreChat
-      DOMAIN_CLIENT: http://localhost:3080
-      DOMAIN_SERVER: http://localhost:3080
+      DOMAIN_CLIENT: ${LIBRECHAT_PUBLIC_URL:-http://localhost:3080}
+      DOMAIN_SERVER: ${LIBRECHAT_PUBLIC_URL:-http://localhost:3080}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODELS: ${OPENAI_MODEL}
       ALLOW_EMAIL_LOGIN: "true"
-      ALLOW_REGISTRATION: "true"
+      ALLOW_REGISTRATION: "false"
       ALLOW_SOCIAL_LOGIN: "false"
       SEARCH: "false"
       NO_INDEX: "true"

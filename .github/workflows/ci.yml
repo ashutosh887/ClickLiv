@@ -1,4 +1,4 @@
-name: ci
+name: CI
 
 on:
   push:
@@ -17,6 +17,7 @@ permissions:
 jobs:
   # The stdlib unittest suite. No ClickHouse, no network, no secrets.
   tests:
+    name: Unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -25,11 +26,13 @@ jobs:
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - run: make test
+      - name: Run unit tests
+        run: make test
 
   # The real SQL, end to end, on the committed fixture. chDB runs ClickHouse
   # in-process, so there is no server to start and nothing to authenticate to.
   pipeline:
+    name: Pipeline on chDB
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -42,4 +45,5 @@ jobs:
       # for the wrong reason. Fail here instead.
       - name: chDB is installed
         run: uv run --extra embedded python -c "import chdb; print(chdb.__version__)"
-      - run: make fixture-pipeline
+      - name: Run the pipeline against the fixture
+        run: make fixture-pipeline
