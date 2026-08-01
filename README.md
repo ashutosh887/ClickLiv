@@ -82,8 +82,18 @@ Gate A: PASS  (12/12 checks)
 Every other target, the ClickHouse Cloud path, and the surfaces you can start on your own
 machine are in [docs/operations.md](docs/operations.md). The data and the observability
 stores themselves run on a ClickHouse Cloud service and a ClickHouse managed Postgres
-service in `ap-south-1`, both private to the team's org; nothing in this repo is hosted
-publicly, and the answers are committed as files rather than served from a URL.
+service in `ap-south-1`, both private to the team's org, and the answers are committed as
+files rather than served from a URL.
+
+## Live demo
+
+- **[clickliv.vercel.app](https://clickliv.vercel.app)** is the permanent public piece:
+  the concurrency chart, deployed on Vercel, calling ClickHouse Cloud through a
+  serverless proxy so the read only key never reaches the browser.
+- Langfuse, LibreChat, the MCP server and ClickStack run on a laptop and are only
+  public while `./scripts/public_demo.sh` is running, over Cloudflare quick tunnels.
+  The URL changes on every run and the tunnel dies when the process stops, so none of
+  those are linked here. Start them yourself from [docs/operations.md](docs/operations.md).
 
 ## What's in the box
 
