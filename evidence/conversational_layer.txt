@@ -28,12 +28,8 @@ marts.*.
 
 conversation id 3fbbe1c1-4425-4e76-b104-e859e25fffab
 
-login for tomorrow's demo: email clickliv-demo@example.com, password
-ClickLiv-Demo-2026!, registered directly against LibreChat, email
-verification not required since ALLOW_EMAIL_LOGIN is on with no mail
-server configured. In the UI, the MCP tool picker must have
-clickliv-marts turned on for the guardrailed surface to answer; it is
-off by default per message.
+In the UI, the MCP tool picker must have clickliv-marts turned on for
+the guardrailed surface to answer; it is off by default per message.
 
 ================================================================
 2026-08-01, second pass: the guardrailed surface was never actually
@@ -174,6 +170,5 @@ Q: what is the peak concurrency for hindi audio?
    exact-match-wins fix landed; 'hin' alone is 1,614.
    conversation 274d9d70-2926-4ec9-a788-ea95559e9a01
 
-login for the demo is in credentials.env, gitignored, local only. In
-the UI the MCP tool picker must have clickliv-marts turned on for the
+In the UI the MCP tool picker must have clickliv-marts turned on for the
 guardrailed surface to answer; it is off by default per message.

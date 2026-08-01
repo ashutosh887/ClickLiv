@@ -534,7 +534,7 @@ as the restricted role reading 96,818 rows each.
   every other consumer uses. No admin credential exists in that environment, and the API
   response says so in a `served_by` field.
 - **[librechat.15-252-63-157.sslip.io](https://librechat.15-252-63-157.sslip.io)** is the
-  conversational surface. Demo login in `credentials.env`, gitignored and local only.
+  conversational surface.
 - **[langfuse.15-252-63-157.sslip.io](https://langfuse.15-252-63-157.sslip.io)** is the LLM
   observability pillar.
 - **[clickstack.15-252-63-157.sslip.io](https://clickstack.15-252-63-157.sslip.io)** traces

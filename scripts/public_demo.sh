@@ -68,6 +68,4 @@ if [ -n "$LIBRECHAT_URL" ] || [ -n "$LANGFUSE_URL" ]; then
 fi
 
 echo
-echo "logins: LibreChat clickliv-demo@example.com / ClickLiv-Demo-2026!"
-echo "        Langfuse uses LANGFUSE_INIT_USER_EMAIL and LANGFUSE_INIT_USER_PASSWORD from .env"
 echo "stop everything with: ./scripts/public_demo.sh --stop"
