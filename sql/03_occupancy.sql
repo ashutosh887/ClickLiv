@@ -127,8 +127,12 @@ CREATE TABLE minute_occupancy
 )
 ENGINE = SummingMergeTree(sessions)
 PARTITION BY toYYYYMMDD(toDateTime(minute * 60, 'UTC'))
-ORDER BY (country, platform, video_type, category, app_version,
-          player_version, audio_language, subtitle_language, content_id, minute);
+-- minute leads because it is the only predicate the index can use: every marts query
+-- carries a minute range, and the dimension filters reach the table wrapped in lower()
+-- or as col = col, neither of which KeyCondition can turn into a range. Every dim still
+-- appears, so the SummingMergeTree grouping is unchanged and no number moves.
+ORDER BY (minute, country, platform, video_type, category, app_version,
+          player_version, audio_language, subtitle_language, content_id);
 
 INSERT INTO minute_occupancy
 SELECT

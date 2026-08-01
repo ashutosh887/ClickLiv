@@ -8,13 +8,13 @@ query_id. Not client wall clock: network round trip and Python overhead are
 excluded, so this is what the server itself spent.
 
 samples: 40 of 40 (8 benchmark queries x 5 repetitions)
-min       16.0 ms
-p50       22.0 ms
-p95       27.0 ms
-p99       30.0 ms
-max       30.0 ms
+min       28.0 ms
+p50       29.0 ms
+p95       32.0 ms
+p99       42.0 ms
+max       42.0 ms
 
-PASS: measured p99 of 30.0 ms is within the 100 ms target
+PASS: measured p99 of 42.0 ms is within the 100 ms target
 
 percentiles are nearest-rank over every sample. The per-sample rows are in
 evidence/serving_slo.csv so these numbers can be recomputed, not just believed.

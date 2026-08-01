@@ -20,10 +20,10 @@ Expression ((Project names + Projection))
             Keys:
               content_id
             Condition: (content_id in [2078157818, 2078157818])
-            Parts: 6/7
-            Granules: 16/17
+            Parts: 7/7
+            Granules: 17/17
             Search Algorithm: generic exclusion search
-          Ranges: 6
+          Ranges: 7
 
 -- after, default settings, the planner picks proj_content_minute on its own
 Expression ((Project names + Projection))
@@ -35,8 +35,8 @@ Expression ((Project names + Projection))
           Keys:
             content_id
           Condition: (content_id in [2078157818, 2078157818])
-          Parts: 6/6
-          Granules: 6/16
+          Parts: 6/7
+          Granules: 6/17
           Search Algorithm: binary search
         Ranges: 6
 
@@ -50,8 +50,8 @@ Expression ((Project names + Projection))
           Keys:
             content_id
           Condition: (content_id in [2078157818, 2078157818])
-          Parts: 6/6
-          Granules: 6/16
+          Parts: 6/7
+          Granules: 6/17
           Search Algorithm: binary search
         Ranges: 6
 

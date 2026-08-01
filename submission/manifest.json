@@ -2,7 +2,7 @@
   "clickhouse_version": "26.4.1.2029",
   "host": "buzl62k3rx.ap-south-1.aws.clickhouse.cloud",
   "database": "clickliv",
-  "git_commit": "046c8e63fa47876fcc83548ef44bdd63a6acdc16",
+  "git_commit": "9a420d2a2432cf1481f84654924e990ab37ff21f",
   "gap_seconds": 90,
   "grace_seconds": 40,
   "row_counts": {

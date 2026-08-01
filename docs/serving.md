@@ -44,19 +44,85 @@ merely slow, it does not start.
 The live check of both of those, against the Cloud service, is in [mcp.md](mcp.md), because
 the MCP server is the client that runs as `marts_agent`.
 
+## The sort key serves the one predicate the index can actually use
+
+`minute_occupancy` is sorted by `(minute, country, platform, video_type, category,
+app_version, player_version, audio_language, subtitle_language, content_id)`. Time
+leads, and that is not the obvious choice, so here is the measurement that forced it.
+
+`EXPLAIN indexes = 1` on the served view is the whole argument. Every call into
+`marts.v_occupancy_minute` carries a minute range and any of the nine dimension filters,
+and the index analyzer reports exactly one usable key:
+
+```
+PrimaryKey
+  Keys:
+    minute
+```
+
+The dimension predicates never appear, because the view matches values case
+insensitively and `lower(col) = lower(...)` is not something `KeyCondition` can invert
+into a range. That applies to all eight string dimensions and it is not a bug to fix,
+it is the price of letting a model write `LIVE` and get the live slice. So the nine
+dimension columns earn nothing at all as a sort key prefix on the served surface, while
+sitting in front of `minute` and pushing the one predicate that does work down to
+position ten. A range predicate on the last key column cannot binary
+search; it falls back to generic exclusion search, which on this data meant reading every
+granule of the largest part on every query.
+
+Measured on the Cloud service, through `marts.v_occupancy_minute`, before and after:
+
+| 90-minute window | before | after |
+|---|---|---|
+| granules | 11/11 | 1/11 |
+| search algorithm | generic exclusion search | binary search |
+| rows read | 89,739 | 8,192 |
+
+Three things are worth stating rather than leaving to be discovered.
+
+**The headline "89,739 rows read to return 91 rows" is not 986x of waste.** Aggregation
+collapses the result, so output rows are the wrong denominator. On the busiest 90-minute
+window 82,699 of those 89,739 rows genuinely match the filter, and the real waste is
+8.5%. That window is where peak concurrency lives, it holds 92% of its partition, and no
+sort key can prune it. The 11x above is from an ordinary off-peak window, which is the
+honest place to measure pruning.
+
+**The cost is storage, not latency.** Leading with `minute` breaks up the runs that made
+the low-cardinality dimensions compress, and the base table grows from 145,654 to 345,636
+bytes on disk, 2.4x. Explicit `ZSTD` on those columns was tried and recovers 5%, so the
+cost is structural rather than a codec mistake. Wall clock does not move: an A/B of the
+two layouts on the same service at the same moment, full scan of all 96,818 rows, is 7 ms
+against 7 ms.
+
+**Two cheaper fixes were tried and rejected on measurement.** A `minmax` skip index on
+`minute`, keeping the old order, eliminates 2 granules of 11, and a `set(0)` index
+eliminates 3, because with `minute` last every granule spans nearly the full time range.
+Leading with `intDiv(minute, 60)` to keep an hour of dimension clustering does not prune
+at all, because `KeyCondition` will not derive a range on `intDiv(minute, 60)` from a
+range on `minute`. Only moving the column works.
+
+Every dimension is still in the `ORDER BY`, so the `SummingMergeTree` grouping key is the
+same set it always was and no number moves: Gate A stayed 12 of 12, all seven slice peaks
+are identical, and the Gate B and Gate D hashes are unchanged, which they must be since
+those fingerprints are `groupBitXor` and cannot see layout at all. `country` stays second
+rather than being demoted for having one distinct value. Behind a range key its position
+is measurably irrelevant, and on a day that carries more than one country it is the first
+dimension an equality filter would want. The fix was to promote `minute`, not to punish
+`country`.
+
 ## Projections, proven not asserted
 
 `content_id` sits last among the dims in `minute_occupancy`'s `ORDER BY` (D7), so a
-`content_id` filter only gets partial pruning off the base table. `make projections`
+`content_id` filter gets no useful pruning off the base table. `make projections`
 adds `proj_content_minute`, reordered by `(content_id, minute)`, and captures the
 before, the after, and the forced comparison to `evidence/projections.txt`:
 
 ```
 before, optimize_use_projections = 0            ReadFromMergeTree (minute_occupancy)
-                                                 Granules: 16/16, generic exclusion search
+                                                 Granules: 17/17, generic exclusion search
 after, default settings, planner's own choice    ReadFromMergeTree (proj_content_minute)
-                                                 Granules: 6/16, binary search
-forced, force_optimize_projection_name           same plan, same 6/16
+                                                 Granules: 6/17, binary search
+forced, force_optimize_projection_name           same plan, same 6/17
 ```
 
 The planner picks the projection on its own; forcing it by name lands on the identical

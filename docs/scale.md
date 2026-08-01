@@ -33,6 +33,35 @@ session-minute grain is structural and does not erode as the table grows; under 
 growth, where sessions gain more events rather than being cloned wholesale, the serving
 table grows slower than raw events and this ratio would widen further.
 
+## The sort key is the part of this that only matters at scale
+
+The rollup being small is what makes the numbers above comfortable, and it is also what
+makes the sort key look free. At 96,818 rows the whole table is one 12-granule part and a
+full scan is 7 ms, so no layout can be measurably wrong. The reason the layout was fixed
+anyway is that the failure it had was a scaling failure, not a latency one.
+
+`minute` used to sit last in the `ORDER BY`, behind nine dimension columns, and a range
+predicate on the last key column cannot binary search. The planner fell back to generic
+exclusion search and selected every granule of the largest part for every query. That
+costs nothing when the largest part is 89,739 rows. At 100x it is the difference between
+a query that reads its time window and a query that reads the day, and it grows linearly
+with the data while the answer stays the same size. The [serving
+notes](serving.md#the-sort-key-serves-the-one-predicate-the-index-can-actually-use) carry
+the before and after plans.
+
+The bound that replaces it is the one worth quoting at scale: a time-ranged query reads
+granules proportional to the window it asks for, not to the table. Partition pruning
+already bounded a query to the days it touches, 6 parts of 7 eliminated on a 90-minute
+window; the primary key now bounds it inside the day as well, 1 granule of 11 on an
+ordinary window. Those two compose, so the read cost of the dashboard tracks the length
+of the range on the x axis rather than the size of the history behind it.
+
+The cost is paid in storage and it is bounded and known: 2.4x on the serving table,
+145,654 to 345,636 bytes, because leading with time breaks up the runs that let the
+low-cardinality dimensions compress. At 100x that is 35 MB instead of 14 MB against 438
+MB of raw events, so the rollup goes from 3% of the raw footprint to 8% and stays an
+order of magnitude smaller than the thing it replaces.
+
 ## Session-level or user-level concurrency
 
 The data dictionary says user-level concurrency can be derived from `user_id`. The
