@@ -14,6 +14,7 @@ services:
         soft: 262144
         hard: 262144
     volumes:
+      - ./docker/z-access.xml:/etc/clickhouse-server/users.d/z-access.xml:ro
       - ch-data:/var/lib/clickhouse
       - ch-logs:/var/log/clickhouse-server
     healthcheck:
@@ -32,7 +33,7 @@ services:
       - "4318:4318"
       - "8124:8123"
     volumes:
-      - ./observability/clickliv-user.xml:/etc/clickhouse-server/users.d/clickliv.xml:ro
+      - ./docker/clickstack-user.xml:/etc/clickhouse-server/users.d/clickliv.xml:ro
       - hdx-db:/data/db
       - hdx-data:/var/lib/clickhouse
       - hdx-logs:/var/log/clickhouse-server

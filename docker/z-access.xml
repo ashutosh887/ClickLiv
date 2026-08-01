@@ -1,0 +1,8 @@
+<clickhouse>
+  <users>
+    <clickliv>
+      <access_management>1</access_management>
+      <named_collection_control>1</named_collection_control>
+    </clickliv>
+  </users>
+</clickhouse>
