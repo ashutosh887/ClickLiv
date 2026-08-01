@@ -4,8 +4,11 @@ CREATE TABLE active_intervals
 (
     video_session_id String CODEC(ZSTD(1)),
     segment_id       UInt32,
-    ts_start_ms      Int64 CODEC(DoubleDelta, ZSTD(1)),
-    ts_end_ms        Int64 CODEC(DoubleDelta, ZSTD(1))
+-- Segment boundaries are millisecond epochs ordered by session, not by time, so
+-- consecutive values jump arbitrarily and neither delta stage pays for itself.
+-- Measured: DoubleDelta 2.00x, Delta 2.18x, plain ZSTD 2.25x (docs/scale.md#codecs).
+    ts_start_ms      Int64 CODEC(ZSTD(1)),
+    ts_end_ms        Int64 CODEC(ZSTD(1))
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(fromUnixTimestamp64Milli(ts_start_ms, 'UTC'))

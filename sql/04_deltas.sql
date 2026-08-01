@@ -10,7 +10,7 @@ CREATE TABLE minute_deltas
     player_version    LowCardinality(String),
     audio_language    LowCardinality(String),
     subtitle_language LowCardinality(String),
-    content_id        UInt64 CODEC(T64, ZSTD(1)),
+    content_id        UInt64 CODEC(ZSTD(1)),
     minute            UInt32 CODEC(DoubleDelta, ZSTD(1)),
     delta             Int32
 )

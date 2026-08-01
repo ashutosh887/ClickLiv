@@ -2,6 +2,10 @@ DROP TABLE IF EXISTS session_minutes;
 
 CREATE TABLE session_minutes
 (
+-- DoubleDelta stays on minute and only on minute: it is a dense near-constant-stride
+-- integer, which is the one shape DoubleDelta is built for, and it measures 143.81x
+-- against 39.71x for plain ZSTD on minute_occupancy. T64 comes off content_id for the
+-- reason given in 01_schema.sql. Measurements in docs/scale.md#codecs.
     video_session_id  String CODEC(ZSTD(1)),
     minute            UInt32 CODEC(DoubleDelta, ZSTD(1)),
     platform          LowCardinality(String),
@@ -10,7 +14,7 @@ CREATE TABLE session_minutes
     audio_language    LowCardinality(String),
     subtitle_language LowCardinality(String),
     player_version    LowCardinality(String),
-    content_id        UInt64 CODEC(T64, ZSTD(1)),
+    content_id        UInt64 CODEC(ZSTD(1)),
     video_type        LowCardinality(String),
     category          LowCardinality(String)
 )
@@ -121,7 +125,7 @@ CREATE TABLE minute_occupancy
     player_version    LowCardinality(String),
     audio_language    LowCardinality(String),
     subtitle_language LowCardinality(String),
-    content_id        UInt64 CODEC(T64, ZSTD(1)),
+    content_id        UInt64 CODEC(ZSTD(1)),
     minute            UInt32 CODEC(DoubleDelta, ZSTD(1)),
     sessions          UInt32
 )
