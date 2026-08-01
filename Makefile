@@ -3,7 +3,7 @@ CLI := uv run --quiet python -m clickliv
 .PHONY: up down logs obs obs-up obs-down obs-logs ping schema load reconcile \
         sessionize occupancy deltas reference verify pipeline all gate-b gate-c \
         sweep chdb marts answers projections scale ui userlevel crossover decline \
-        incremental reset
+        incremental test reset
 
 up:
 	docker compose up -d --wait
@@ -97,6 +97,9 @@ decline:
 
 incremental:
 	$(CLI) incremental
+
+test:
+	uv run --quiet python -m unittest discover -s tests -v
 
 reset:
 	$(CLI) reset
