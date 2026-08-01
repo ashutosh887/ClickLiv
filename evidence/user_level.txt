@@ -1,0 +1,18 @@
+-- O4: session-level vs user-level concurrency, at the peak minute
+-- session-level (served) is uniqExact(video_session_id) grouped by dims and minute
+-- user-level (not served) would be uniq(user_id), HyperLogLog, mergeable via
+-- uniqState/uniqMerge and bounded in memory, per D16
+
+peak minute 29751056
+concurrent sessions      2,692
+concurrent users, exact  2,626
+concurrent users, approx 2,626 (0.00% error vs exact)
+
+sessions with more than one user_id: 120
+users with more than one concurrent video_session_id (same account, multiple devices): 784
+
+reading: 66 of the peak's 2,692 sessions are a
+second device on an account already counted, so user-level concurrency is
+2.5% lower than session-level at the peak.
+uniq matches uniqExact exactly at this cardinality, so uniqState/uniqMerge is
+a safe, bounded choice if user-level concurrency is ever served.

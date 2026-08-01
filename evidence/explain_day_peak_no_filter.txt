@@ -39,46 +39,46 @@ Sorting (Sorting for ORDER BY)
 
 -- EXPLAIN ANALYZE
 Query summary:
-  Time:        7.00 ms (planning 3.28 ms · execution 3.72 ms)
-  Read:        96.82 thousand rows, 1.84 MB (26.01 million rows/s., 494.47 MB/s.)
-  Peak memory: 738.19 KiB
+  Time:        6.51 ms (planning 3.36 ms · execution 3.16 ms)
+  Read:        96.82 thousand rows, 1.84 MB (30.66 million rows/s., 582.77 MB/s.)
+  Peak memory: 624.31 KiB
 
 Output: minute DIV 1440 * 1440, max(sum(sessions)), avg(sum(sessions)), count()
 
 Expression ((Project names + (Projection + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Project names + (Projection + (Change column names to column identifiers + Project names))))))))
 │  I/O: rows 7 → 7 · 224 B → 224 B
-│    time 1.63 us (0.0%) · parallelism 0.95/1
+│    time 2.50 us (0.1%) · parallelism 0.98/1
 └──Sorting (Sorting for ORDER BY)
    │  Sort description: minute DIV 1440 * 1440 ASC
    │  I/O: rows 7 → 7 · 224 B → 224 B
-   │    Stage (sorting): time 10.08 us (0.3%) · parallelism 1.24/2
-   │    Stage (merge sorted streams): time 5.63 us (0.2%) · parallelism 0.99/1
+   │    Stage (sorting): time 10.33 us (0.3%) · parallelism 1.05/3
+   │    Stage (merge sorted streams): time 6.21 us (0.2%) · parallelism 0.98/1
    └──Expression ((Before ORDER BY + Projection))
       │  I/O: rows 7 → 7 · 224 B → 224 B
-      │    time 916.00 ns (0.0%) · parallelism 1.00/1
+      │    time 666.00 ns (0.0%) · parallelism 0.94/1
       └──Aggregating
          │  Keys: minute DIV 1440 * 1440
          │  Aggregates: max(sum(sessions)), avg(sum(sessions)), count()
          │  Skip merging: 0
          │  I/O: rows 3.65 thousand → 7 (0.19%) · 58.38 KB → 224 B
-         │    Stage (partial aggregation): time 46.42 us (1.2%) · parallelism 1.11/2
-         │    Stage (final aggregation): time 4.67 us (0.1%) · parallelism 0.98/1
+         │    Stage (partial aggregation): time 48.46 us (1.5%) · parallelism 1.00/3
+         │    Stage (final aggregation): time 3.62 us (0.1%) · parallelism 0.99/1
          └──Expression ((Before GROUP BY + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Project names + (Projection + (Change column names to column identifiers + (Project names + (Before ORDER BY + Projection)))))))))
             │  I/O: rows 3.65 thousand → 3.65 thousand · 43.79 KB → 58.38 KB
-            │    time 3.96 us (0.1%) · parallelism 0.99/1
+            │    time 4.00 us (0.1%) · parallelism 0.99/1
             └──Aggregating
                │  Keys: minute
                │  Aggregates: sum(sessions)
                │  Skip merging: 0
                │  I/O: rows 96.82 thousand → 3.65 thousand (3.77%) · 774.54 KB → 43.79 KB
-               │    Stage (partial aggregation): time 239.08 us (6.4%) · parallelism 1.06/2
-               │    Stage (final aggregation): time 45.96 us (1.2%) · parallelism 1.00/1
+               │    Stage (partial aggregation): time 249.29 us (7.9%) · parallelism 1.08/3
+               │    Stage (final aggregation): time 94.12 us (3.0%) · parallelism 1.00/1
                └──Expression (Before GROUP BY)
                   │  I/O: rows 96.82 thousand → 96.82 thousand · 774.54 KB → 774.54 KB
-                  │    time 1.88 us (0.1%) · parallelism 0.80/2
+                  │    time 2.21 us (0.1%) · parallelism 0.81/3
                   └──Expression ((WHERE + Change column names to column identifiers))
                      │  I/O: rows 96.82 thousand → 96.82 thousand · 774.54 KB → 774.54 KB
-                     │    time 3.75 us (0.1%) · parallelism 0.93/2
+                     │    time 4.17 us (0.1%) · parallelism 0.93/3
                      └──ReadFromMergeTree (clickliv.minute_occupancy)
                            Read type: Default
                            Parts: 7 | Granules: 17
@@ -105,4 +105,4 @@ Expression ((Project names + (Projection + (Change column names to column identi
                                Search Algorithm: generic exclusion search
                              Ranges: 7
                            I/O: rows 0 → 96.82 thousand · 0 B → 774.54 KB
-                             time 3.19 ms (85.6%) · parallelism 1.24/2
+                             time 2.60 ms (82.4%) · parallelism 1.36/3
