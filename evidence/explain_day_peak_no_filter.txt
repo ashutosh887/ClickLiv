@@ -28,7 +28,7 @@ Expression ((Project names + (Projection + (Change column names to column identi
                     Search Algorithm: generic exclusion search
                   Ranges: 7
 
--- EXPLAIN ANALYZE unavailable on this server (runnable EXPLAIN ANALYZE needs ClickHouse 26.7+): 400 on query 9207a53e-892d-494d-88ee-cb06ebc5873e
+-- EXPLAIN ANALYZE unavailable on this server (runnable EXPLAIN ANALYZE needs ClickHouse 26.7+): 400 on query faecdd91-146f-4127-8a96-c774dc214743
 Code: 62. DB::Exception: Syntax error: failed at position 17 (SELECT) (line 1, col 17): SELECT * FROM marts.v_concurrency(grain_minutes = 1440, country = '', platform = '', video_type = '', content_id = 0, minute_from = 29734063, minute_to = 297510... Expected one of: token sequence, Dot, token, Equals. (SYNTAX_ERROR) (version 26.4.1.2029 (official build))
 ---
 EXPLAIN ANALYZE SELECT * FROM marts.v_concurrency(grain_minutes = 1440, country = '', platform = '', video_type = '', content_id = 0, minute_from = 29734063, minute_to = 29751090)

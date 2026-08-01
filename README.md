@@ -7,6 +7,25 @@ A viewer counts as concurrent only while they are **playing**, **foregrounded**,
 **39%** and average concurrency by **49%** on the provided dataset, and it puts the peak
 in the wrong minute.
 
+## Everything you can open
+
+Every surface in one place. Start the stack with `make up && make obs-up && make llm-up
+&& make chat-up`, then `make mcp` and `make ui` in their own shells.
+
+| Open this | Where | Started by | What it shows |
+|---|---|---|---|
+| Concurrency dashboard | <http://localhost:8090> | `make ui` | The concurrency curve with a platform filter, read straight from `marts.v_concurrency` |
+| LibreChat | <http://localhost:3080> | `make chat-up` | Ask for concurrency in plain language, answered through the guardrailed MCP tools |
+| Langfuse | <http://localhost:3300> | `make llm-up` | LLM and MCP traces, with token usage and cost, stored in our own ClickHouse Cloud service |
+| ClickStack (HyperDX) | <http://localhost:8080> | `make obs-up` | Pipeline traces, every stage and every query, with server-side `read_rows` attached |
+| MCP health | <http://localhost:8765/health> | `make mcp` | The four pre-vetted tools and the restricted user they run as |
+| ClickHouse MCP health | <http://localhost:8766/health> | `make chat-up` | The official read-only ClickHouse MCP surface |
+| ClickHouse Cloud console | <https://console.clickhouse.cloud> | provisioned | Service `ClickLiv`, `ap-south-1`, plus the `clickliv-langfuse` managed Postgres service |
+
+Answers and evidence live in the repo rather than behind a URL: `answers/`,
+`evidence/` and `submission/`. `sql/09_dashboard.sql` holds the saved queries for a
+Cloud console dashboard.
+
 ## The correctness argument
 
 Five independent paths compute the same number, and gates diff them row for row.
@@ -64,6 +83,12 @@ make userlevel   # O4: session-level vs user-level concurrency, evidence/user_le
 make crossover   # the problem statement's own dimension-crossover example, measured
 make decline     # optional: deterministic concurrency-decline alerting
 make incremental # a real open session absorbs a new heartbeat live, proven vs batch
+make instantaneous # O3: occupancy vs instantaneous overlap, for every dimension slice
+make submission  # O2: the answer bundle, plus the measured serving SLO (O6b)
+make replay      # the graded unseen-day run, reset to submission bundle, one command
+make mcp         # the guardrailed MCP server, four pre-vetted tools over marts
+make llm-up      # Langfuse 4.1.0 on 3300, both of its databases ClickHouse products
+make chat-up     # LibreChat v0.8.7 on 3080, wired to both MCP surfaces
 ```
 
 `make all` runs CSV to Gate A in about 8 seconds. Every command runs unchanged against
@@ -74,7 +99,8 @@ target at a time, Cloud or local Docker, the other block commented out (see
 
 Verified end to end against it (Mumbai, `ap-south-1`, 2 replicas): Gate A 12/12, Gate B
 byte-identical hashes to local, marts, answers, projections, scale, userlevel,
-crossover, decline and incremental all pass, matching local numbers exactly. Three
+crossover, decline, incremental, instantaneous, submission and the MCP surface all
+pass, matching local numbers exactly. Four
 real, Cloud-specific differences found and fixed while proving that, not assumed away:
 
 - **A multi-replica read-after-write race.** A plain `SYSTEM RELOAD DICTIONARY` or
@@ -89,6 +115,16 @@ real, Cloud-specific differences found and fixed while proving that, not assumed
   a config flag: syntax error, not a runtime error, on Cloud's 26.4. `answers.py`
   degrades gracefully, records why in the evidence file, and every other check is
   unaffected.
+- **A replica's `system.query_log` holds only the queries that replica ran.** Cloud
+  routes each HTTP request to either replica, so reading `system.query_log` after a
+  round-robined batch of queries returned roughly half of them: 2 of 8 rows in one
+  case, and the missing latencies were silently absent rather than reported as
+  missing. Latency evidence was incomplete without ever failing. Every `query_log`
+  read now spans every replica through
+  `clusterAllReplicas(default, system.query_log)`, resolved once per connection by
+  probing for a cluster so the single-node local target still reads the plain table.
+  The same fix collapsed the tracer's own second, differently-worded `query_log` read
+  into that one helper.
 - **Cloud enforces a password complexity policy** (uppercase + digit + special
   character) that local Docker does not. `MARTS_PASSWORD` needed a real password, not
   the local placeholder.
@@ -110,9 +146,19 @@ Gate D: PASS  chDB agrees with the server
 Same SQL files, two ClickHouse runtimes, two ClickHouse versions, identical hashes. The
 portability is not a claim, it is a target you can run.
 
-## Observability
+## Observability, and the four OSS pillars
 
-ClickStack is the OSS pillar. It runs beside the pipeline, never inside it.
+The requirement is to meaningfully integrate at least one of ClickStack, Langfuse or
+LibreChat. All three are integrated, and ClickHouse is underneath every one of them.
+
+| Pillar | Version | Brought up by | Host port |
+|---|---|---|---|
+| ClickHouse | 26.7.1.1315 in Docker, 26.4.1.2029 on Cloud | `make up`, or `.env` pointed at Cloud | 8123, 8443 on Cloud |
+| ClickStack | all-in-one | `make obs-up` | HyperDX 8080, OTLP 4317 and 4318 |
+| Langfuse | 4.1.0 | `make llm-up` | 3300 |
+| LibreChat | v0.8.7 | `make chat-up` | 3080 |
+
+ClickStack observes the pipeline. It runs beside it, never inside it.
 
 ```sh
 make obs-up      # all-in-one: OTLP on 4317 and 4318, HyperDX on 8080, its ClickHouse on 8124
@@ -160,6 +206,25 @@ synchronous MergeTree inserts and the panel that would move first on a live feed
 over the same client that runs the pipeline. ClickHouse is the analytical engine on both
 sides of the integration.
 
+**Langfuse 4.1.0, with a ClickHouse product on both sides of it.** `make llm-up` brings
+it up at `localhost:3300`, self-hosted, from `docker compose --profile llm`. The
+notable part is not that it runs, it is what it runs on. Langfuse keeps an analytical
+store and a transactional store, and here both of them are ClickHouse products. The
+trace store is this project's own ClickHouse Cloud service, database `langfuse`, where
+92 Langfuse migrations have applied and the tables sit on `SharedMergeTree` and
+`SharedReplacingMergeTree`, Cloud's own engines. The transactional store is ClickHouse
+managed Postgres 17.10 in `ap-south-1`, provisioned with
+`clickhousectl cloud postgres create`. Blob storage is a real S3 bucket in the same
+region, reached through an IAM user scoped to that one bucket: those credentials can
+write `events/` and are refused `s3:ListAllMyBuckets`. Only Redis runs as a local
+container, because Langfuse requires Redis and ClickHouse is not a queue.
+
+Tracing is one exporter with two sinks, not two exporters. ClickStack observes the
+pipeline, Langfuse observes the LLM and MCP calls, both over the same stdlib OTLP
+writer. Each is off until its own variables are set, so with neither `CLICKSTACK_OTLP`
+nor `LANGFUSE_HOST` configured the default pipeline makes no network call and its
+output is unchanged.
+
 ## The serving surface
 
 The benchmark question shapes are private (O2). Rather than guess the exact wording,
@@ -196,6 +261,50 @@ own ceiling; every attempt to touch `max_execution_time`, `max_rows_to_read`, or
 `readonly` itself is rejected before the query runs, not after. A raw scan is not
 merely slow, it does not start.
 
+## The MCP surface, where a model can ask
+
+`make mcp` runs `src/clickliv/mcp.py`, a Streamable HTTP MCP server on port 8765 at
+`/mcp`, on the standard library like the rest of the project. It exposes four
+pre-vetted, parameterized tools over the `marts` views and nothing else:
+`concurrency_peak`, `concurrency_series`, `top_slices`, `list_dimensions`. Set
+`MCP_PORT` to move it, since the dashboard defaults to the same port.
+
+The model never emits SQL. Filter values are checked against an allowlist of real
+dimension values and integers against explicit bounds, and whatever survives reaches
+ClickHouse as a bound query parameter, never as text spliced into a statement. The
+server also connects as `marts_agent` rather than as the pipeline's own user, so the
+query budget is enforced by ClickHouse and not by this project's good intentions.
+Checked live against the Cloud service rather than argued:
+
+```
+marts_agent SELECT ON clickliv.minute_occupancy   Code 497, not enough privileges
+marts_agent SELECT ON clickliv.raw_events         Code 497
+marts_agent SELECT ON clickliv.active_intervals   Code 497
+marts_agent SELECT ON system.query_log            Code 497
+marts_agent SET max_execution_time = 600          Code 164, readonly = 1 CONST
+platform = "ANDROID_PHONE' OR 1=1 --"             tool error, before any SQL is built
+```
+
+Every answer the server returns ends with its `query_id`, the rows the server read, the
+server-side elapsed time, and the user it ran as, so a reader can go and check it. The
+rows-read figure comes out of the response's own statistics block; verified byte
+identical to `system.query_log.read_rows` for the same `query_id`, 96,818 rows both
+ways on the unfiltered day-grain call.
+
+**LibreChat v0.8.7 talks to two MCP surfaces, and says which one it used.**
+`make chat-up` brings it up at `localhost:3080` from `docker compose --profile chat`,
+with OpenAI `gpt-5.2` as the model provider and MongoDB for its own state. Meilisearch
+and the RAG API, the two optional sidecars, are left out on purpose: neither is needed
+to chat over MCP. `docker/librechat.yaml` wires in `clickliv-marts`, the guardrailed
+server above, and `clickhouse-official`, the official ClickHouse MCP server
+(`ghcr.io/clickhouse/mcp-clickhouse:0.4.1`, `CLICKHOUSE_ALLOW_WRITE_ACCESS=false` and
+`CLICKHOUSE_ALLOW_DROP=false`, on 8766). The guardrailed server is the default, because
+its answers are the numbers the pipeline publishes and its budget is enforced
+server-side; the official server is the labelled escape hatch for schema exploration
+and ad hoc aggregates that have no mart behind them, and its instructions require the
+model to show the SQL it ran, so a reader can tell an ad hoc query from a published
+mart.
+
 ## Answers and evidence
 
 No pipeline evidence, no credit. `make answers` runs a benchmark set of peak and
@@ -225,6 +334,28 @@ a latency should not be forced to pretend it is. Every number is computed by a q
 this repository ran, tagged with a `query_id`, and traceable to `system.query_log`;
 none of it is hand-typed.
 
+`make submission` runs that same benchmark set five times over and turns it into the
+two things nobody upstream specified.
+
+**A serving SLO, because no SLA was published (O6b).** Rather than leave serving
+latency unstated, the target is ours and stated: p99 under 100ms. The committed run
+measures p99 **30ms**, p50 22ms, p95 27ms, min 16ms over 40 samples, 8 benchmark
+queries times 5 repetitions, every one of them server-side `query_duration_ms` read
+from `system.query_log` by `query_id` rather than client wall clock. Latency moves a
+millisecond or two run to run, which is exactly why `evidence/serving_slo.txt` carries
+the percentiles and `evidence/serving_slo.csv` carries the per-sample rows: they can be
+recomputed rather than believed.
+
+**A format-agnostic answer bundle, because no answer format was published (O2).**
+`submission/` holds the answers as `benchmark_answers.csv` and as
+`benchmark_answers.json`, written from one source of truth so the two cannot disagree,
+plus `manifest.json` recording the ClickHouse version, the host and database, row counts
+for `raw_events`, `active_intervals`, `minute_occupancy` and `minute_deltas`, the minute
+range in both epoch minutes and UTC, the git commit, the gap and grace thresholds, the
+Python reference's own peak, and a SHA-256 plus byte size for every other file in the
+bundle. `README.txt` explains the columns, names the average's denominator, and states
+where the latencies come from, so a grader can read the bundle cold.
+
 ## Projections, proven not asserted
 
 `content_id` sits last among the dims in `minute_occupancy`'s `ORDER BY` (D7), so a
@@ -252,6 +383,33 @@ peak and average concurrency per hour, one platform filter, nothing more. No new
 dependency: it is a standard-library `http.server` reusing the same zero-dependency
 `ClickHouse` client as the rest of the project, reading `marts.v_concurrency` directly.
 The platform list in the filter is queried live from `minute_occupancy`, not hand-typed.
+
+## The unseen-day run
+
+The graded drop is one fresh CSV (O8), so the whole run is one command. Drop the new
+file into `data/`, point `RAW_CSV` at it in `.env`, then:
+
+```sh
+make replay      # reset, schema, load, sessionize, occupancy, deltas, reference,
+                 # verify (Gate A), marts, projections, answers, instantaneous, submission
+```
+
+Then commit `answers/`, `evidence/` and `submission/`. `replay` prints each step as it
+starts, stops at the first one that fails and names it, and reports its own wall clock
+at the end. Nothing about it is specific to the tuning file: the CSV paths are
+environment variables, and the thresholds are substituted into the SQL from the same
+place.
+
+That day-agnosticism is a property the loader had to be fixed to have, and it is worth
+stating plainly because the bug would have been expensive. `reconcile` used to compare
+any input against the tuning day's measured counts (905,558 events, 10,866 sessions,
+9,618 users, 3,357 referenced content ids, 33,463 content rows) and fail the run on any
+mismatch, so a fresh day that was merely different rather than wrong would have aborted
+the graded run before it did any work. It now separates the two kinds of check. Day
+invariants still fail the run: every `content_id` in the events has to resolve through
+the content dictionary, and something has to have actually loaded. Row counts are
+reported as drift instead, marked `differs (expected on a new day)`, followed by
+`input differs from the tuning data; day-invariant checks still enforced`.
 
 ## Gate C, the held-out dry run
 
@@ -367,13 +525,18 @@ detection. One real event exists in the tuning data: 214 to 7 sessions, a 96.7% 
 found by the rule rather than manufactured. `evidence/decline_alerts.txt`.
 
 On top of that, one genuinely optional LLM call narrates *which* of the three named
-causes the pattern suggests, off unless `AWS_BEARER_TOKEN_BEDROCK` is set, same
-no-op-by-default discipline as ClickStack tracing. Not Claude: Bedrock's Claude
-inference profiles are not reachable from this account in `ap-south-1` (checked
-directly, token quota is stuck at 0 and not self-service adjustable). `openai.
-gpt-oss-120b` through Bedrock's OpenAI-compatible endpoint is, verified with a real
-call: given the 96.7% drop above, it correctly reasoned "asset-ended" from the shape
-of the drop alone, matching what a human would conclude from the same number.
+causes the pattern suggests, off unless a provider key is set, same no-op-by-default
+discipline as tracing. OpenAI `gpt-5.2` is preferred when `OPENAI_API_KEY` is set, and
+Bedrock `openai.gpt-oss-120b` is kept as the fallback rather than deleted; both speak
+the OpenAI Responses shape, so one reader parses either, and the evidence file names
+whichever produced the text it carries. Not Claude: Bedrock's Claude inference profiles
+are not reachable from this account in `ap-south-1` (checked directly, token quota is
+stuck at 0 and not self-service adjustable). Both working providers were verified with a
+real call on the 96.7% drop above, and each reasoned "asset ended" from the shape of the
+drop alone, which is what a human would conclude from the same number. The call is
+traced to Langfuse as a generation, carrying the model, the prompt, the completion and
+the token usage. No LLM sits anywhere in the correctness path: every number in
+`answers/`, `evidence/` and `submission/` is produced by SQL this repository ran.
 
 ## Session-level or user-level concurrency
 
@@ -464,14 +627,39 @@ value, and it is the honest one.
 
 ## Occupancy or instantaneous overlap
 
-Two defensible readings of "concurrency at minute m", and they give different answers:
+Two defensible readings of "concurrency at minute m", and they give different answers
+on every slice, not only in aggregate. Occupancy is any active playback during minute
+m; instantaneous is the overlap at a single point in time. `make instantaneous`
+computes both for all seven slices Gate A checks and writes
+`evidence/instantaneous_vs_occupancy.txt`:
 
-- **Occupancy**, any active playback during minute m: **2,692**.
-- **Instantaneous**, overlap at a point in time: **2,282**.
+| Slice | Occupancy | Instantaneous | Gap |
+|---|---|---|---|
+| no filter | 2,692 | 2,282 | 15.2% |
+| platform ANDROID_PHONE | 1,704 | 1,442 | 15.4% |
+| platform SONY_ANDROID_TV | 279 | 246 | 11.8% |
+| video_type live | 425 | 354 | 16.7% |
+| audio_language hin | 1,614 | 1,405 | 12.9% |
+| IPHONE in india | 329 | 263 | 20.1% |
+| vod on Mweb | 62 | 51 | 17.7% |
 
-Both are computed. Occupancy leads, because the problem statement's own worked example
-reads that way, and the instantaneous figure is reported alongside it. Instantaneous can
-never exceed occupancy, and Gate A asserts that.
+The gap runs from 11.8% to 20.1%, so the two readings are not interchangeable at any
+slice and the choice has to be stated rather than assumed. Two independent SQL paths
+produce the instantaneous column and agree exactly on all seven: `maxIntersections`
+over closed millisecond intervals, and a signed event sweep on the half-open form.
+
+The method has to add dimensions without moving the number. Each active interval is
+clipped to every minute it covers, that minute's dimension tuple is joined in from
+`session_minutes`, the filter is applied, each session's surviving pieces are merged
+back into continuous presence, and only then is the overlap peaked. Unfiltered, the
+clipping produces 137,738 pieces and the merge returns exactly 32,164 intervals, the
+same segment count as `active_intervals` and as the independent Python reference, so the
+merge validates itself rather than being taken on trust. The unfiltered instantaneous
+peak is 2,282 either way, which Gate A pins to that reference.
+
+Occupancy leads, because the problem statement's own worked example reads that way, and
+the instantaneous figure is reported alongside it per slice. Instantaneous can never
+exceed occupancy, and Gate A asserts that.
 
 ## Design notes
 
@@ -507,9 +695,12 @@ src/clickliv/ui.py           the minimal concurrency dashboard
 src/clickliv/userlevel.py    O4, session-level vs user-level concurrency, measured
 src/clickliv/crossover.py    the problem statement's dimension-crossover example
 src/clickliv/decline.py      optional: deterministic concurrency-decline alerting
-src/clickliv/bedrock.py      one optional LLM call, off unless a Bedrock key is set
+src/clickliv/llm.py          one optional LLM call, OpenAI first, Bedrock fallback
 sql/08_incremental.sql       open_session_state, mv_extend_open_session
 src/clickliv/incremental.py  proves the incremental path agrees with a batch rebuild
+src/clickliv/instantaneous.py O3, instantaneous overlap beside occupancy, per slice
+src/clickliv/submission.py   O2 answer bundle and the O6b serving SLO, one run
+src/clickliv/mcp.py          the MCP server, four pre-vetted tools as marts_agent
 src/clickliv/cli.py          command dispatch, identical for local and Cloud
 src/clickliv/ch.py           zero-dependency ClickHouse HTTP client
 src/clickliv/load.py         CSV ingestion, content before events
@@ -518,9 +709,10 @@ src/clickliv/verify.py       Gate A
 src/clickliv/gates.py        Gate B
 src/clickliv/chdb_engine.py  Gate D, the whole pipeline in-process
 src/clickliv/sweep.py        threshold sensitivity grid
-src/clickliv/otel.py         OTLP exporter, spans carry server-side metrics
+src/clickliv/otel.py         OTLP exporter, two sinks, server-side metrics on spans
 src/clickliv/observe.py      reads the trace back out of ClickStack
-docker/                      access-management and ClickStack user overrides
+docker/librechat.yaml        LibreChat wired to both MCP surfaces, labelled
+docker/                      access management, ClickStack user, LibreChat config
 tests/                       stdlib unittest, zero dependencies, make test
 ```
 
@@ -529,13 +721,14 @@ environment, which is what lets one set of files serve local, Cloud, and the swe
 
 ## Tests
 
-`make test`, `python -m unittest discover -s tests`, zero new dependencies. Covers the
-pure, deterministic logic that the four correctness gates never happen to exercise on
-their own: SQL statement splitting, credential redaction, JSONCompact parsing, config
-construction, the Gate B fingerprint comparison, Gate C's day-splitting on a CSV, the
-Bedrock no-op path, and a pin on the exact counts `reconcile()` diffs against. The
-gates are the correctness tests for the pipeline itself; this suite is for the parts
-around it.
+`make test`, 24 tests, `python -m unittest discover -s tests`, zero new dependencies.
+Covers the pure, deterministic logic that the four correctness gates never happen to
+exercise on their own: SQL statement splitting, credential redaction, JSONCompact
+parsing, config construction, the Gate B fingerprint comparison, Gate C's day-splitting
+on a CSV, LLM provider selection (no key is a no-op, OpenAI wins when both are set,
+Bedrock remains the fallback), and a pin on the exact counts `reconcile()` diffs
+against. The gates are the correctness tests for the pipeline itself; this suite is for
+the parts around it.
 
 ## Licence
 
