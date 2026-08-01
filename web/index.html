@@ -3,168 +3,403 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ClickLiv, foreground-only concurrency</title>
+<title>ClickLiv, foreground-only concurrency on ClickHouse</title>
+<meta name="description" content="An open app is not a viewer. Foreground-only concurrent viewers for SonyLIV streaming telemetry, computed and served entirely in ClickHouse.">
 <style>
   :root {
-    color-scheme: light dark;
-    --bg: #fbfbfa; --panel: #ffffff; --line: #e3e2df; --ink: #16150f;
-    --muted: #6b6a63; --accent: #d4491f; --grid: #efeeeb;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #14140f; --panel: #1c1c17; --line: #2e2e27; --ink: #f2f1ea;
-      --muted: #97958c; --accent: #ff6b3d; --grid: #26261f;
-    }
+    color-scheme: light;
+    --bg: #ffffff; --soft: #f7f7f7; --line: #e4e4e4; --ink: #161616;
+    --muted: #595959; --yellow: #faff69;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+    font: 15px/1.6 Inter, ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 22px 64px; }
-  header { border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 26px; }
-  h1 { font-size: 22px; letter-spacing: -0.01em; margin: 0 0 6px; font-weight: 620; }
-  .sub { color: var(--muted); margin: 0; max-width: 62ch; }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 24px 0; }
-  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
-  .stat .k { color: var(--muted); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
-  .stat .v { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 4px; }
-  .stat .v.accent { color: var(--accent); }
-  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
-  label { color: var(--muted); font-size: 13px; }
-  select {
-    font: inherit; font-size: 14px; padding: 7px 10px; border-radius: 8px;
-    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
-  }
-  .chart { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; }
-  svg { display: block; width: 100%; height: auto; }
-  .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-  .gridline { stroke: var(--grid); stroke-width: 1; }
-  .area { fill: var(--accent); opacity: 0.12; }
-  .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
-  footer { margin-top: 26px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 18px; }
-  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 26px 22px 72px; }
   a { color: inherit; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  h1 { margin: 0; font-weight: 640; letter-spacing: -0.02em; }
+  h2 {
+    font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600; margin: 0 0 18px;
+  }
+  h3 { font-size: 15px; margin: 0 0 5px; font-weight: 600; letter-spacing: -0.005em; }
+  p { margin: 0 0 10px; }
+
+  .topbar {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--line);
+  }
+  .mark { font-weight: 660; letter-spacing: -0.015em; text-decoration: none; font-size: 16px; }
+  .mark em { font-style: normal; background: var(--yellow); padding: 0 3px; border-radius: 2px; }
+  .topbar nav { display: flex; gap: 20px; font-size: 13.5px; color: var(--muted); }
+  .topbar nav a { text-decoration: none; }
+  .topbar nav a:hover { color: var(--ink); }
+
+  section { margin-top: 56px; }
+  .hero { margin-top: 44px; }
+  .hero h1 { font-size: 40px; line-height: 1.1; max-width: 18ch; }
+  .kicker {
+    font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 14px;
+  }
+  .lead { font-size: 18.5px; line-height: 1.55; max-width: 58ch; margin: 18px 0 0; color: #2e2e2e; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+  .btn {
+    display: inline-block; padding: 11px 20px; border-radius: 6px; font-size: 14.5px;
+    font-weight: 560; text-decoration: none; border: 1px solid var(--line);
+    background: var(--bg); color: var(--ink);
+  }
+  .btn.primary { background: var(--yellow); border-color: var(--yellow); }
+  .btn:hover { border-color: var(--ink); }
+
+  .claim { border: 1px solid var(--line); border-radius: 10px; padding: 26px 28px; }
+  .claim p { font-size: 18px; line-height: 1.55; max-width: 66ch; }
+  .num {
+    font-weight: 640; font-variant-numeric: tabular-nums;
+    background: linear-gradient(transparent 58%, var(--yellow) 58%); padding: 0 2px;
+  }
+  .live {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11px;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink);
+  }
+  .live::before {
+    content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--yellow);
+    border: 1px solid #d8dd3f;
+  }
+  .live.stale::before { background: var(--soft); border-color: var(--line); }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px; margin: 26px 0 0; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .stat { background: var(--bg); padding: 15px 17px; }
+  .stat .k { color: var(--muted); font-size: 11.5px; letter-spacing: 0.05em; text-transform: uppercase; }
+  .stat .v { font-size: 28px; font-weight: 620; font-variant-numeric: tabular-nums; margin-top: 5px; letter-spacing: -0.02em; }
+  .stat .v.small { font-size: 18px; }
+  .stat .n { color: var(--muted); font-size: 12px; margin-top: 3px; }
   .status { color: var(--muted); font-size: 13px; min-height: 20px; }
+
+  .flow {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    background: var(--soft); border-radius: 10px; padding: 18px; margin-bottom: 26px;
+  }
+  .node {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 5px;
+    padding: 7px 11px; font-size: 12.5px; white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .node.on { background: var(--yellow); border-color: var(--yellow); }
+  .arrow { color: var(--muted); font-size: 13px; }
+  .flow .aside { flex-basis: 100%; color: var(--muted); font-size: 12.5px; padding-top: 6px; }
+
+  .steps { counter-reset: step; }
+  .step {
+    display: grid; grid-template-columns: 38px 1fr; gap: 12px;
+    padding: 15px 0; border-top: 1px solid var(--line);
+  }
+  .steps .step:last-child { border-bottom: 1px solid var(--line); }
+  .step::before {
+    counter-increment: step; content: counter(step, decimal-leading-zero);
+    color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12.5px; padding-top: 3px;
+  }
+  .step p { color: var(--muted); margin: 0; max-width: 76ch; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px; }
+  .card {
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; text-decoration: none; display: block;
+  }
+  .card:hover { border-color: var(--ink); }
+  .card p { color: var(--muted); margin: 0; }
+  .card .host {
+    color: var(--muted); font-size: 12px; margin-top: 10px; word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  .limit { padding: 15px 0; border-top: 1px solid var(--line); max-width: 84ch; }
+  .limits .limit:last-child { border-bottom: 1px solid var(--line); }
+  .limit p { color: var(--muted); margin: 0; }
+
+  footer {
+    margin-top: 56px; color: var(--muted); font-size: 13px;
+    border-top: 1px solid var(--line); padding-top: 20px; max-width: 82ch;
+  }
+
+  @media (max-width: 620px) {
+    .hero h1 { font-size: 30px; }
+    .lead { font-size: 16.5px; }
+    .claim { padding: 18px; }
+    .claim p { font-size: 16px; }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <h1>ClickLiv</h1>
-    <p class="sub">Foreground-only concurrency for SonyLIV streaming telemetry. A viewer counts
-    only while playing, foregrounded and heartbeat-fresh. Every number below is read live from
-    ClickHouse Cloud through one parameterized view.</p>
-  </header>
 
-  <div class="stats">
-    <div class="stat"><div class="k">Peak, foreground only</div><div class="v accent" id="peak">&hellip;</div></div>
-    <div class="stat"><div class="k">Naive, any open session</div><div class="v" id="naive">&hellip;</div></div>
-    <div class="stat"><div class="k">Overcount avoided</div><div class="v" id="overcount">&hellip;</div></div>
-    <div class="stat"><div class="k">Server time, this query</div><div class="v" id="served">&hellip;</div></div>
+  <div class="topbar">
+    <a class="mark" href="/">Click<em>Liv</em></a>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#surfaces">Live surfaces</a>
+      <a href="#limits">Limits</a>
+      <a href="/dashboard">Dashboard</a>
+      <a href="https://github.com/ashutosh887/ClickLiv">GitHub</a>
+    </nav>
   </div>
 
-  <div class="controls">
-    <label for="platform">Platform</label>
-    <select id="platform"><option value="">All platforms</option></select>
-    <label for="videoType">Type</label>
-    <select id="videoType"><option value="">All types</option></select>
-    <label for="grain">Grain</label>
-    <select id="grain">
-      <option value="hour" selected>Hour</option>
-      <option value="minute">Minute</option>
-      <option value="day">Day</option>
-    </select>
-  </div>
+  <section class="hero">
+    <p class="kicker">DevSapiens &middot; ClickHouse Click-a-thon 2026 &middot; SonyLIV concurrency track</p>
+    <h1>An open app is not a viewer.</h1>
+    <p class="lead">A session counts as a concurrent viewer only while it is playing, foregrounded
+    and heartbeat-fresh. ClickLiv computes that rule over SonyLIV streaming telemetry entirely
+    inside ClickHouse, and proves the answer against independent paths that share no code.</p>
+    <div class="actions">
+      <a class="btn primary" href="/dashboard">View dashboard</a>
+      <a class="btn" href="https://github.com/ashutosh887/ClickLiv">Read the source</a>
+    </div>
+  </section>
 
-  <div class="chart"><svg id="chart" viewBox="0 0 940 340" preserveAspectRatio="none"></svg></div>
-  <p class="status" id="status">Loading&hellip;</p>
+  <section>
+    <h2>The result</h2>
+    <div class="claim">
+      <p id="claim">Counting every open session instead overstates peak concurrency by
+        <span class="num" id="peakOver">&hellip;</span> and average concurrency by
+        <span class="num" id="avgOver">&hellip;</span>.
+        <span id="minuteClause"></span></p>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="k">Peak, foreground only</div>
+          <div class="v" id="peak">&hellip;</div>
+          <div class="n" id="peakAt">&nbsp;</div>
+        </div>
+        <div class="stat">
+          <div class="k">Naive, any open session</div>
+          <div class="v" id="naive">&hellip;</div>
+          <div class="n" id="naiveAt">&nbsp;</div>
+        </div>
+        <div class="stat">
+          <div class="k">Average, foreground only</div>
+          <div class="v" id="avg">&hellip;</div>
+          <div class="n" id="avgNaive">&nbsp;</div>
+        </div>
+        <div class="stat">
+          <div class="k">Data window, UTC</div>
+          <div class="v small" id="window">&hellip;</div>
+          <div class="n" id="windowSpan">&nbsp;</div>
+        </div>
+      </div>
+
+      <p class="status" id="claimStatus" style="margin: 18px 0 0">Reading from ClickHouse Cloud&hellip;</p>
+    </div>
+  </section>
+
+  <section id="how">
+    <h2>How it works</h2>
+
+    <div class="flow">
+      <div class="node">raw_events</div><div class="arrow">&rarr;</div>
+      <div class="node">active_intervals</div><div class="arrow">&rarr;</div>
+      <div class="node">minute_occupancy</div><div class="arrow">&rarr;</div>
+      <div class="node on">marts.v_concurrency</div><div class="arrow">&rarr;</div>
+      <div class="node">dashboard, chat, notebooks</div>
+      <div class="aside">The same intervals also feed <code>minute_deltas</code>,
+        <code>maxIntersections</code> and a Python reference that reads the CSV directly.
+        Twelve checks diff all four.</div>
+    </div>
+
+    <div class="steps">
+      <div class="step">
+        <div>
+          <h3>Land the events, aggregate nothing on the way in</h3>
+          <p>Every telemetry row goes into a partitioned MergeTree exactly as it arrived, so any
+          later decision about what counts as watching can be revisited without a reload.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div>
+          <h3>Sessionize into active intervals</h3>
+          <p>A window function turns ordered events into intervals of genuine playback. Intervals
+          close on pause, background, error, session end and on any heartbeat gap past the
+          threshold, and they reopen on play, resume and foreground while playing. Closing never
+          waits for a matching marker, because the markers do not balance in this data.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div>
+          <h3>Collapse to one row per session and minute</h3>
+          <p>A session that plays in several bursts inside one minute is still one viewer in that
+          minute. Deduplicating to a single active flag per session and minute buys the property
+          the whole serving layer rests on: per-minute concurrency is additive across dimensions,
+          so summing slice counts gives the total.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div>
+          <h3>Sum signed deltas as a second, differently built path</h3>
+          <p>The same intervals become plus one and minus one events on merged runs, summed into a
+          SummingMergeTree and read back as a windowed cumulative sum. It exists to disagree with
+          the rollup, and it never does.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div>
+          <h3>Serve one parameterized view, behind a budgeted role</h3>
+          <p>Curated <code>marts</code> views answer any combination of dimension filter, time
+          range and grain. Filtering happens before aggregation and aggregation is always to
+          minute, so the order of operations holds whatever is asked. Consumers hold a read-only
+          role scoped to <code>marts</code> and nothing underneath, with a query budget the server
+          enforces rather than a prompt.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div>
+          <h3>Cross-check against an oracle that shares no code</h3>
+          <p><code>maxIntersections</code> computes the same overlap arithmetically with no rollup
+          involved, and a Python reference reads the source CSV and owes ClickHouse nothing. The
+          pipeline also rebuilds byte identically, runs on a held out single day, and reproduces
+          the same hashes in chDB with no server at all.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="surfaces">
+    <h2>Live surfaces</h2>
+    <div class="cards">
+      <a class="card" href="/dashboard">
+        <h3>Concurrency dashboard</h3>
+        <p>The curve and every filter, read live through the same parameterized view every other
+        consumer uses. Proves the serving layer answers arbitrary slices at minute grain.</p>
+        <div class="host">clickliv.vercel.app/dashboard</div>
+      </a>
+      <a class="card" href="https://librechat.15-252-63-157.sslip.io">
+        <h3>LibreChat</h3>
+        <p>Ask the same questions in plain language. Proves a warehouse is safe to point a model at,
+        through pre-vetted MCP tools whose filter values are checked against the data itself.</p>
+        <div class="host">librechat.15-252-63-157.sslip.io</div>
+      </a>
+      <a class="card" href="https://langfuse.15-252-63-157.sslip.io">
+        <h3>Langfuse</h3>
+        <p>Every model and tool call traced. Proves the observability pillar is a second ClickHouse
+        workload, with traces in ClickHouse Cloud and transactional state in ClickHouse managed
+        Postgres.</p>
+        <div class="host">langfuse.15-252-63-157.sslip.io</div>
+      </a>
+      <a class="card" href="https://clickstack.15-252-63-157.sslip.io">
+        <h3>ClickStack</h3>
+        <p>One span per pipeline stage, per ingest and per query, carrying what the server itself
+        recorded. Proves the latency figures are read from <code>system.query_log</code> rather
+        than from a client stopwatch.</p>
+        <div class="host">clickstack.15-252-63-157.sslip.io</div>
+      </a>
+      <a class="card" href="https://github.com/ashutosh887/ClickLiv">
+        <h3>Source and evidence</h3>
+        <p>The SQL, the gates, the answer bundle and a manifest with a hash per file. Proves every
+        number here is reproducible from a clean clone in two commands.</p>
+        <div class="host">github.com/ashutosh887/ClickLiv</div>
+      </a>
+    </div>
+  </section>
+
+  <section id="limits">
+    <h2>What is measured, and what is not</h2>
+    <div class="limits">
+      <div class="limit">
+        <h3>Concurrency has two defensible readings and nobody upstream published which one counts</h3>
+        <p>Occupancy means any active playback inside the minute. Instantaneous means overlap at a
+        point in time. They differ at every slice, so both are computed and both are published.
+        Occupancy leads because the problem statement's own worked example reads that way.</p>
+      </div>
+      <div class="limit">
+        <h3>Paused playback is excluded on purpose</h3>
+        <p>The question is who is watching, not who has the app open. That is a stated choice rather
+        than a discovered fact, and it is one predicate to flip if the definition differs.</p>
+      </div>
+      <div class="limit">
+        <h3>Liveness thresholds come from the measured heartbeat cadence, not the data dictionary</h3>
+        <p>The documented cadence and the observed one disagree, so every threshold derives from the
+        measurement. The two remaining guesses are swept across a grid rather than argued for, and
+        the sweep ships with the answer.</p>
+      </div>
+      <div class="limit">
+        <h3>Average concurrency is reported against two denominators</h3>
+        <p>There is no single defensible denominator and the choice moves the answer, so both are
+        labelled everywhere they appear instead of one being quietly picked. The average above
+        divides by the minutes in which any session was open.</p>
+      </div>
+      <div class="limit">
+        <h3>Dimension values are published exactly as stored</h3>
+        <p>The source spells some language codes more than one way and those spellings stay distinct
+        here. Nothing is silently merged, because merging two real values would inflate a slice
+        without anyone noticing.</p>
+      </div>
+      <div class="limit">
+        <h3>Serving latency moves between runs</h3>
+        <p>The stable claim is the target, p99 under 100 ms, self-imposed because no upstream SLA
+        was ever published. Every figure is <code>query_duration_ms</code> read back by query id,
+        never client wall clock.</p>
+      </div>
+    </div>
+  </section>
 
   <footer>
-    Served by <code>marts.v_concurrency</code> as <code>marts_agent</code>, a read-only role with a
-    ClickHouse-enforced query budget. The browser never receives a database credential.
-    Source at <a href="https://github.com/ashutosh887/ClickLiv">github.com/ashutosh887/ClickLiv</a>.
+    Built by DevSapiens for the ClickHouse Click-a-thon 2026, SonyLIV foreground-only concurrency
+    track. The figures in the result panel are read live from ClickHouse Cloud through a serverless
+    proxy authenticating as <code>marts_agent</code>, a read-only role with a query budget the
+    server enforces. No database credential reaches the browser and no admin credential exists in
+    that environment. Everything else on this page is prose about the method. MIT licensed.
   </footer>
 </div>
 
 <script type="module">
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n).toLocaleString('en-US');
+const pct = (n) => `${Number(n).toFixed(1)}%`;
+const minuteOf = (stamp) => String(stamp).slice(11, 16);
+const dayOf = (stamp) => String(stamp).slice(0, 10);
+const schemaOf = (dataset) => (dataset === 'clickliv' ? 'marts' : `marts_${dataset}`);
 
-async function loadDimensions() {
-  const res = await fetch('/api/dimensions');
-  if (!res.ok) return;
+function fill(data) {
+  $('peakOver').textContent = pct(data.peak_overcount_pct);
+  $('avgOver').textContent = pct(data.average_overcount_pct);
+
+  const foreground = minuteOf(data.foreground_peak_utc);
+  const naive = minuteOf(data.naive_peak_utc);
+  $('minuteClause').innerHTML = foreground === naive
+    ? `On this dataset both peaks land in the same minute, <span class="num">${naive}</span> UTC.`
+    : `It also puts the peak in the wrong minute, <span class="num">${naive}</span> UTC where the`
+      + ` true peak is <span class="num">${foreground}</span>.`;
+
+  $('peak').textContent = fmt(data.foreground_peak);
+  $('peakAt').textContent = `${dayOf(data.foreground_peak_utc)} at ${foreground} UTC`;
+  $('naive').textContent = fmt(data.naive_peak);
+  $('naiveAt').textContent = `${dayOf(data.naive_peak_utc)} at ${naive} UTC`;
+  $('avg').textContent = Number(data.foreground_average).toFixed(1);
+  $('avgNaive').textContent = `${Number(data.naive_average).toFixed(1)} counting every open session`;
+  $('window').textContent = `${dayOf(data.window_from)} to ${dayOf(data.window_to)}`;
+  $('windowSpan').textContent =
+    `${fmt(data.minutes_with_sessions)} minutes carrying sessions, ${fmt(data.occupancy_rows)} rollup rows`;
+
+  $('claimStatus').innerHTML =
+    `<span class="live">live</span> &nbsp;dataset <code>${data.dataset}</code>, read from`
+    + ` <code>${schemaOf(data.dataset)}.v_overcount</code> in ${fmt(data.server_ms)} ms of`
+    + ' ClickHouse server time.';
+}
+
+try {
+  const res = await fetch('/api/headline');
   const data = await res.json();
-  for (const row of data.platforms || []) {
-    $('platform').insertAdjacentHTML('beforeend',
-      `<option value="${row.name}">${row.name} (${fmt(row.peak)})</option>`);
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  fill(data);
+} catch (error) {
+  for (const id of ['peakOver', 'avgOver', 'peak', 'naive', 'avg', 'window']) {
+    $(id).textContent = 'unavailable';
   }
-  for (const row of data.video_types || []) {
-    $('videoType').insertAdjacentHTML('beforeend',
-      `<option value="${row.name}">${row.name} (${fmt(row.peak)})</option>`);
-  }
-  const head = data.headline;
-  if (!head) return;
-  $('naive').textContent = fmt(head.naive_peak);
-  $('overcount').textContent = `${head.peak_overcount_pct.toFixed(0)}%`;
-  $('served').textContent = `${fmt(head.server_ms)} ms`;
+  $('claimStatus').innerHTML =
+    '<span class="live stale">not read</span> &nbsp;These figures are read live and the read did'
+    + ' not return, so nothing is shown in their place. The measured run is in the repository.';
 }
-
-function draw(rows) {
-  const svg = $('chart');
-  svg.innerHTML = '';
-  if (!rows.length) { $('status').textContent = 'No data for that slice.'; return; }
-
-  const W = 940, H = 340, L = 56, R = 14, T = 16, B = 34;
-  const iw = W - L - R, ih = H - T - B;
-  const top = Math.max(...rows.map((r) => r.peak_concurrency)) || 1;
-  const x = (i) => L + (rows.length === 1 ? iw / 2 : (i / (rows.length - 1)) * iw);
-  const y = (v) => T + ih - (v / top) * ih;
-
-  const parts = [];
-  for (let t = 0; t <= 4; t++) {
-    const v = Math.round((top / 4) * t), py = y(v);
-    parts.push(`<line class="gridline" x1="${L}" y1="${py}" x2="${W - R}" y2="${py}"/>`);
-    parts.push(`<text class="axis" x="${L - 8}" y="${py + 4}" text-anchor="end">${fmt(v)}</text>`);
-  }
-  const line = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(r.peak_concurrency).toFixed(1)}`).join('');
-  parts.push(`<path class="area" d="${line}L${x(rows.length - 1).toFixed(1)},${y(0)}L${x(0).toFixed(1)},${y(0)}Z"/>`);
-  parts.push(`<path class="line" d="${line}"/>`);
-
-  const step = Math.max(1, Math.ceil(rows.length / 7));
-  rows.forEach((r, i) => {
-    if (i % step && i !== rows.length - 1) return;
-    parts.push(`<text class="axis" x="${x(i).toFixed(1)}" y="${H - 12}" text-anchor="middle">${String(r.bucket_start).slice(5, 16)}</text>`);
-  });
-  svg.innerHTML = parts.join('');
-}
-
-async function load() {
-  $('status').textContent = 'Loading…';
-  const params = new URLSearchParams({
-    grain: $('grain').value,
-    platform: $('platform').value,
-    video_type: $('videoType').value,
-  });
-  try {
-    const res = await fetch(`/api/concurrency?${params}`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || res.statusText);
-    $('peak').textContent = fmt(data.peak);
-    draw(data.rows);
-    const read = data.statistics?.rows_read;
-    $('status').textContent =
-      `${fmt(data.rows.length)} buckets at ${data.grain} grain`
-      + (read ? `, ${fmt(read)} rows read server side` : '');
-  } catch (error) {
-    $('status').textContent = `Could not load: ${error.message}`;
-  }
-}
-
-for (const id of ['platform', 'videoType', 'grain']) $(id).addEventListener('change', load);
-await loadDimensions();
-await load();
 </script>
 </body>
 </html>

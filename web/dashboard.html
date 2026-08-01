@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClickLiv dashboard, foreground-only concurrency</title>
+<meta name="description" content="Foreground-only concurrent viewers per minute, hour or day, read live from ClickHouse Cloud through one parameterized view.">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #ffffff; --soft: #f7f7f7; --line: #e4e4e4; --ink: #161616;
+    --muted: #595959; --yellow: #faff69;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.6 Inter, ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 26px 22px 72px; }
+  a { color: inherit; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  h1 { font-size: 24px; letter-spacing: -0.02em; margin: 0 0 8px; font-weight: 640; }
+  p { margin: 0 0 10px; }
+  .sub { color: var(--muted); margin: 0; max-width: 64ch; }
+
+  .topbar {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--line);
+  }
+  .mark { font-weight: 660; letter-spacing: -0.015em; text-decoration: none; font-size: 16px; }
+  .mark em { font-style: normal; background: var(--yellow); padding: 0 3px; border-radius: 2px; }
+  .topbar nav { display: flex; gap: 20px; font-size: 13.5px; color: var(--muted); }
+  .topbar nav a { text-decoration: none; }
+  .topbar nav a:hover { color: var(--ink); }
+
+  header { margin: 34px 0 26px; }
+  .stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px;
+    margin: 0 0 26px; background: var(--line); border: 1px solid var(--line);
+    border-radius: 8px; overflow: hidden;
+  }
+  .stat { background: var(--bg); padding: 15px 17px; }
+  .stat .k { color: var(--muted); font-size: 11.5px; letter-spacing: 0.05em; text-transform: uppercase; }
+  .stat .v { font-size: 28px; font-weight: 620; font-variant-numeric: tabular-nums; margin-top: 5px; letter-spacing: -0.02em; }
+  .stat .v mark { background: var(--yellow); padding: 0 3px; border-radius: 2px; color: inherit; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+  label { color: var(--muted); font-size: 13px; }
+  select {
+    font: inherit; font-size: 14px; padding: 7px 10px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  }
+  select:focus { outline: 2px solid var(--yellow); outline-offset: 1px; }
+  .hidden { display: none; }
+
+  .chart { border: 1px solid var(--line); border-radius: 10px; padding: 18px; overflow-x: auto; }
+  svg { display: block; width: 100%; height: auto; }
+  .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .gridline { stroke: #ededed; stroke-width: 1; }
+  .area { fill: var(--yellow); opacity: 0.55; }
+  .line { fill: none; stroke: var(--ink); stroke-width: 1.75; stroke-linejoin: round; }
+  .status { color: var(--muted); font-size: 13px; min-height: 20px; margin-top: 12px; }
+
+  footer {
+    margin-top: 44px; color: var(--muted); font-size: 13px;
+    border-top: 1px solid var(--line); padding-top: 20px; max-width: 82ch;
+  }
+  @media (max-width: 620px) { h1 { font-size: 21px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <a class="mark" href="/">Click<em>Liv</em></a>
+    <nav>
+      <a href="/">Overview</a>
+      <a href="/#how">How it works</a>
+      <a href="/#surfaces">Live surfaces</a>
+      <a href="https://github.com/ashutosh887/ClickLiv">GitHub</a>
+    </nav>
+  </div>
+
+  <header>
+    <h1>Concurrency dashboard</h1>
+    <p class="sub">Foreground-only concurrent viewers, filtered and bucketed by one parameterized
+    view. A viewer counts only while playing, foregrounded and heartbeat-fresh. Every figure on
+    this page is read live from ClickHouse Cloud.</p>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="k">Peak, this slice</div><div class="v"><mark id="peak">&hellip;</mark></div></div>
+    <div class="stat"><div class="k">Naive, any open session</div><div class="v" id="naive">&hellip;</div></div>
+    <div class="stat"><div class="k">Overcount avoided</div><div class="v" id="overcount">&hellip;</div></div>
+    <div class="stat"><div class="k">Server time, this query</div><div class="v" id="served">&hellip;</div></div>
+  </div>
+
+  <div class="controls">
+    <label for="dataset" id="datasetLabel" class="hidden">Dataset</label>
+    <select id="dataset" class="hidden"></select>
+    <label for="platform">Platform</label>
+    <select id="platform"><option value="">All platforms</option></select>
+    <label for="videoType">Type</label>
+    <select id="videoType"><option value="">All types</option></select>
+    <label for="grain">Grain</label>
+    <select id="grain">
+      <option value="hour" selected>Hour</option>
+      <option value="minute">Minute</option>
+      <option value="day">Day</option>
+    </select>
+  </div>
+
+  <div class="chart"><svg id="chart" viewBox="0 0 940 340" preserveAspectRatio="none"></svg></div>
+  <p class="status" id="status">Loading&hellip;</p>
+
+  <footer>
+    Served by <code id="servedBy">marts.v_concurrency</code> as <code>marts_agent</code>, a
+    read-only role with a ClickHouse-enforced query budget. The browser never receives a database
+    credential. Source at
+    <a href="https://github.com/ashutosh887/ClickLiv">github.com/ashutosh887/ClickLiv</a>.
+  </footer>
+</div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => Number(n).toLocaleString('en-US');
+
+let dataset = '';
+
+function option(value, text) {
+  const node = document.createElement('option');
+  node.value = value;
+  node.textContent = text;
+  return node;
+}
+
+async function loadDatasets() {
+  try {
+    const res = await fetch('/api/datasets');
+    if (!res.ok) return;
+    const data = await res.json();
+    const rows = data.datasets || [];
+    dataset = data.default || '';
+    if (rows.length < 2) return;
+    for (const row of rows) {
+      const window = row.window_from && row.window_to
+        ? `, ${String(row.window_from).slice(0, 10)} to ${String(row.window_to).slice(0, 10)}`
+        : '';
+      $('dataset').append(option(row.name, `${row.name}${window}`));
+    }
+    $('dataset').value = dataset;
+    $('dataset').classList.remove('hidden');
+    $('datasetLabel').classList.remove('hidden');
+  } catch (error) {
+    dataset = '';
+  }
+}
+
+function withDataset(params) {
+  if (dataset) params.set('dataset', dataset);
+  return params;
+}
+
+async function loadDimensions() {
+  $('platform').replaceChildren(option('', 'All platforms'));
+  $('videoType').replaceChildren(option('', 'All types'));
+  const res = await fetch(`/api/dimensions?${withDataset(new URLSearchParams())}`);
+  if (!res.ok) return;
+  const data = await res.json();
+  for (const row of data.platforms || []) {
+    $('platform').append(option(row.name, `${row.name} (${fmt(row.peak)})`));
+  }
+  for (const row of data.video_types || []) {
+    $('videoType').append(option(row.name, `${row.name} (${fmt(row.peak)})`));
+  }
+  const head = data.headline;
+  if (!head) return;
+  $('naive').textContent = fmt(head.naive_peak);
+  $('overcount').textContent = `${head.peak_overcount_pct.toFixed(0)}%`;
+  $('served').textContent = `${fmt(head.server_ms)} ms`;
+}
+
+function draw(rows) {
+  const svg = $('chart');
+  svg.innerHTML = '';
+  if (!rows.length) { $('status').textContent = 'No data for that slice.'; return; }
+
+  const W = 940, H = 340, L = 56, R = 14, T = 16, B = 34;
+  const iw = W - L - R, ih = H - T - B;
+  const top = Math.max(...rows.map((r) => r.peak_concurrency)) || 1;
+  const x = (i) => L + (rows.length === 1 ? iw / 2 : (i / (rows.length - 1)) * iw);
+  const y = (v) => T + ih - (v / top) * ih;
+
+  const parts = [];
+  for (let t = 0; t <= 4; t++) {
+    const v = Math.round((top / 4) * t), py = y(v);
+    parts.push(`<line class="gridline" x1="${L}" y1="${py}" x2="${W - R}" y2="${py}"/>`);
+    parts.push(`<text class="axis" x="${L - 8}" y="${py + 4}" text-anchor="end">${fmt(v)}</text>`);
+  }
+  const line = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(r.peak_concurrency).toFixed(1)}`).join('');
+  parts.push(`<path class="area" d="${line}L${x(rows.length - 1).toFixed(1)},${y(0)}L${x(0).toFixed(1)},${y(0)}Z"/>`);
+  parts.push(`<path class="line" d="${line}"/>`);
+
+  const step = Math.max(1, Math.ceil(rows.length / 7));
+  rows.forEach((r, i) => {
+    if (i % step && i !== rows.length - 1) return;
+    parts.push(`<text class="axis" x="${x(i).toFixed(1)}" y="${H - 12}" text-anchor="middle">${String(r.bucket_start).slice(5, 16)}</text>`);
+  });
+  svg.innerHTML = parts.join('');
+}
+
+async function load() {
+  $('status').textContent = 'Loading…';
+  const params = withDataset(new URLSearchParams({
+    grain: $('grain').value,
+    platform: $('platform').value,
+    video_type: $('videoType').value,
+  }));
+  try {
+    const res = await fetch(`/api/concurrency?${params}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    $('peak').textContent = fmt(data.peak);
+    if (data.served_by) $('servedBy').textContent = data.served_by.split(' as ')[0];
+    draw(data.rows);
+    const read = data.statistics?.rows_read;
+    $('status').textContent =
+      `${fmt(data.rows.length)} buckets at ${data.grain} grain on dataset ${data.dataset}`
+      + (read ? `, ${fmt(read)} rows read server side` : '');
+  } catch (error) {
+    $('status').textContent = `Could not load: ${error.message}`;
+  }
+}
+
+$('dataset').addEventListener('change', async () => {
+  dataset = $('dataset').value;
+  await loadDimensions();
+  await load();
+});
+for (const id of ['platform', 'videoType', 'grain']) $(id).addEventListener('change', load);
+
+await loadDatasets();
+await loadDimensions();
+await load();
+</script>
+</body>
+</html>
