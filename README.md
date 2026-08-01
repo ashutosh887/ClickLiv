@@ -195,6 +195,26 @@ a latency should not be forced to pretend it is. Every number is computed by a q
 this repository ran, tagged with a `query_id`, and traceable to `system.query_log`;
 none of it is hand-typed.
 
+## Projections, proven not asserted
+
+`content_id` sits last among the dims in `minute_occupancy`'s `ORDER BY` (D7), so a
+`content_id` filter only gets partial pruning off the base table. `make projections`
+adds `proj_content_minute`, reordered by `(content_id, minute)`, and captures the
+before, the after, and the forced comparison to `evidence/projections.txt`:
+
+```
+before, optimize_use_projections = 0            ReadFromMergeTree (minute_occupancy)
+                                                 Granules: 16/16, generic exclusion search
+after, default settings, planner's own choice    ReadFromMergeTree (proj_content_minute)
+                                                 Granules: 6/16, binary search
+forced, force_optimize_projection_name           same plan, same 6/16
+```
+
+The planner picks the projection on its own; forcing it by name lands on the identical
+plan, which is the point, not a coincidence to explain away. `system.query_log.projections`
+records `['clickliv.minute_occupancy.proj_content_minute']` for the query, so the claim
+is checkable after the fact and not just at EXPLAIN time.
+
 ## The active rule
 
 A session is active at time `t` when it is playing **and** foregrounded **and**
@@ -305,6 +325,8 @@ sql/04_deltas.sql            merged minute runs to signed deltas
 sql/05_oracles.sql           tables the Python reference is loaded into
 sql/06_marts.sql             parameterized views, RBAC, the query budget
 src/clickliv/answers.py      benchmark answers, latencies and evidence, no hand-typing
+sql/07_projections.sql       proj_content_minute, reordered by (content_id, minute)
+src/clickliv/projections.py  before/after/forced EXPLAIN, query_log confirmation
 src/clickliv/cli.py          command dispatch, identical for local and Cloud
 src/clickliv/ch.py           zero-dependency ClickHouse HTTP client
 src/clickliv/load.py         CSV ingestion, content before events
