@@ -358,7 +358,6 @@ const fmt = (n) => Number(n).toLocaleString('en-US');
 const pct = (n) => `${Number(n).toFixed(1)}%`;
 const minuteOf = (stamp) => String(stamp).slice(11, 16);
 const dayOf = (stamp) => String(stamp).slice(0, 10);
-const schemaOf = (dataset) => (dataset === 'clickliv' ? 'marts' : `marts_${dataset}`);
 
 function fill(data) {
   $('peakOver').textContent = pct(data.peak_overcount_pct);
@@ -383,8 +382,8 @@ function fill(data) {
 
   $('claimStatus').innerHTML =
     `<span class="live">live</span> &nbsp;dataset <code>${data.dataset}</code>, read from`
-    + ` <code>${schemaOf(data.dataset)}.v_overcount</code> in ${fmt(data.server_ms)} ms of`
-    + ' ClickHouse server time.';
+    + ` <code>${data.schema}.v_overcount</code> in ${fmt(data.server_ms)} ms of ClickHouse`
+    + ' server time.';
 }
 
 try {

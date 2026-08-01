@@ -25,6 +25,7 @@ export default async function handler(req, res) {
     return send(res, 200, {
       dataset,
       datasets,
+      schema,
       foreground_peak: Number(foregroundPeak ?? 0),
       foreground_peak_utc: foregroundPeakUtc ?? null,
       naive_peak: Number(naivePeak ?? 0),

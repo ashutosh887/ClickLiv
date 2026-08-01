@@ -44,6 +44,7 @@ export default async function handler(req, res) {
     }));
     return send(res, 200, {
       dataset,
+      schema,
       grain: grainName,
       filters: { platform, video_type: videoType },
       peak: rows.reduce((most, row) => Math.max(most, row.peak_concurrency), 0),

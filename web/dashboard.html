@@ -222,7 +222,7 @@ async function load() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.statusText);
     $('peak').textContent = fmt(data.peak);
-    if (data.served_by) $('servedBy').textContent = data.served_by.split(' as ')[0];
+    if (data.schema) $('servedBy').textContent = `${data.schema}.v_concurrency`;
     draw(data.rows);
     const read = data.statistics?.rows_read;
     $('status').textContent =
