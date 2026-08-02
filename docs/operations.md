@@ -114,6 +114,20 @@ Start the stack with `make up && make obs-up && make llm-up && make chat-up`, th
 4317 and 4318, and keeps its own ClickHouse on 8124. ClickHouse itself answers on 8123
 in Docker and on 8443 when `.env` points at Cloud.
 
+## Deploying the public page
+
+`clickliv.vercel.app` is deployed from the CLI, out of `web/`:
+
+```sh
+cd web && vercel --prod
+```
+
+**The Vercel project has no Git repository connected,** so pushing to GitHub does not
+redeploy it. That is deliberate while the site serves a frozen snapshot, but it is the
+thing to remember if the page ever looks out of date against `main`. The project holds
+no environment variables at all; `make web-snapshot` regenerates `web/snapshot` and the
+deploy carries it.
+
 ## The public EC2 deployment, retired
 
 > This deployment no longer exists. The instance was terminated and the Elastic IP

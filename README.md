@@ -67,11 +67,8 @@ command for each.
 
 ## Demo Video
 
-**<https://youtu.be/RCbLC5MoHrw>**, the 2 to 3 minute walkthrough recorded while the hosted
-demo was still live: the concurrency curve and its filters, the conversational layer answering
-in English, then the correctness gates and the `query_log` evidence behind every number below.
-
-The pitch deck is [`docs/pitch-deck.pdf`](docs/pitch-deck.pdf), 14 slides.
+**<https://youtu.be/RCbLC5MoHrw>**, a 3 minute walkthrough, recorded while the hosted demo was
+live. Deck: [`docs/pitch-deck.pdf`](docs/pitch-deck.pdf).
 
 ---
 
