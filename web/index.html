@@ -76,18 +76,61 @@
   .stat .n { color: var(--muted); font-size: 12px; margin-top: 3px; }
   .status { color: var(--muted); font-size: 13px; min-height: 20px; }
 
-  .flow {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-    background: var(--soft); border-radius: 10px; padding: 18px; margin-bottom: 26px;
+  .diagram {
+    background: var(--soft); border-radius: 10px; padding: 20px 18px; margin-bottom: 26px;
   }
-  .node {
-    background: var(--bg); border: 1px solid var(--line); border-radius: 5px;
-    padding: 7px 11px; font-size: 12.5px; white-space: nowrap;
+  .diagram-svg { display: block; width: 100%; height: auto; }
+  .dv-box { fill: var(--bg); stroke: var(--line); stroke-width: 1.2; }
+  .dv-box-on { fill: var(--yellow); stroke: var(--yellow); }
+  .dv-badge { fill: var(--bg); stroke: var(--line); stroke-width: 1.2; }
+  .dv-title { font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; fill: var(--ink); text-anchor: middle; }
+  .dv-title-on { font-weight: 680; }
+  .dv-title-sm { font-size: 11.5px; }
+  .dv-sub {
+    font: 400 10.5px Inter, ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    fill: var(--muted); text-anchor: middle;
+  }
+  .dv-badge-text {
+    font: 600 12.5px Inter, ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    fill: var(--ink); text-anchor: middle;
+  }
+  .dv-edge { fill: none; stroke: #b9b9b9; stroke-width: 1.4; marker-end: url(#dvArrow); }
+  .dv-edge-dashed { fill: none; stroke: #b9b9b9; stroke-width: 1.3; stroke-dasharray: 5 4; marker-end: url(#dvArrow); }
+  .dv-edge-strong { fill: none; stroke: var(--ink); stroke-width: 1.8; marker-end: url(#dvArrowStrong); }
+  .dv-arrowhead { fill: #9a9a9a; }
+  .dv-arrowhead-strong { fill: var(--ink); }
+  .dv-label {
+    font: 600 10.5px Inter, ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    fill: var(--muted); text-anchor: middle; letter-spacing: 0.03em; text-transform: uppercase;
+  }
+  .dv-label-left { text-anchor: start; }
+
+  .diagram-stack { display: none; flex-direction: column; align-items: stretch; gap: 0; }
+  .dv-step { display: flex; flex-direction: column; align-items: center; }
+  .dv-down { color: var(--muted); font-size: 15px; padding: 3px 0; }
+  .dv-tile {
+    width: 100%; max-width: 340px; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px 13px; text-align: center;
+  }
+  .dv-tile.on { background: var(--yellow); border-color: var(--yellow); }
+  .dv-tile b {
+    display: block; font-size: 13px; font-weight: 600;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
-  .node.on { background: var(--yellow); border-color: var(--yellow); }
-  .arrow { color: var(--muted); font-size: 13px; }
-  .flow .aside { flex-basis: 100%; color: var(--muted); font-size: 12.5px; padding-top: 6px; }
+  .dv-tile span { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+  .dv-tile.on span { color: #4a4a15; }
+  .dv-group-label {
+    font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
+    margin: 10px 0 6px; text-align: center;
+  }
+  .dv-branch, .dv-fan {
+    display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 340px;
+  }
+  .dv-badge-mobile {
+    background: var(--soft); border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 16px; font-size: 12px; font-weight: 600; text-align: center;
+    max-width: 340px;
+  }
 
   .steps { counter-reset: step; }
   .step {
@@ -122,7 +165,7 @@
     border-top: 1px solid var(--line); padding-top: 20px; max-width: 82ch;
   }
 
-  .topbar nav a.gh { display: inline-flex; align-items: center; gap: 6px; }
+  .topbar nav a.gh { display: inline-flex; align-items: center; }
   .tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: 10px; }
   .tool { background: var(--bg); border: 1px solid var(--line); border-radius: 9px;
     padding: 14px 16px; display: flex; gap: 11px; align-items: flex-start; }
@@ -144,6 +187,9 @@
     .lead { font-size: 16.5px; }
     .claim { padding: 18px; }
     .claim p { font-size: 16px; }
+    .diagram-svg-wrap { display: none; }
+    .diagram-stack { display: flex; }
+    .diagram { padding: 18px 14px; }
   }
 </style>
 </head>
@@ -157,7 +203,7 @@
       <a href="#surfaces">Surfaces</a>
       <a href="#limits">Limits</a>
       <a href="/dashboard">Dashboard</a>
-      <a class="gh" href="https://github.com/ashutosh887/ClickLiv"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><span>GitHub</span></a>
+      <a class="gh" href="https://github.com/ashutosh887/ClickLiv" aria-label="GitHub" title="GitHub"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></a>
     </nav>
   </div>
 
@@ -211,15 +257,141 @@
   <section id="how">
     <h2>The pipeline</h2>
 
-    <div class="flow">
-      <div class="node">raw_events</div><div class="arrow">&rarr;</div>
-      <div class="node">active_intervals</div><div class="arrow">&rarr;</div>
-      <div class="node">minute_occupancy</div><div class="arrow">&rarr;</div>
-      <div class="node on">marts.v_concurrency</div><div class="arrow">&rarr;</div>
-      <div class="node">dashboard, chat, answer bundle</div>
-      <div class="aside">The same intervals also feed <code>minute_deltas</code>,
-        <code>maxIntersections</code> and a Python reference that reads the CSV directly.
-        Twelve checks diff all four.</div>
+    <div class="diagram">
+      <div class="diagram-svg-wrap">
+      <svg class="diagram-svg" viewBox="0 0 1080 620" role="img"
+        aria-label="Raw CSVs load into raw_events and content_dict. Active_intervals sessionizes
+        the events. Three independently computed paths take it from there: minute_occupancy, the
+        primary rollup; minute_deltas, a second path built as signed deltas; and maxIntersections,
+        an arithmetic oracle. A Python reference and chDB check the same answer independently.
+        Twelve checks diff all five. The agreed answer serves through marts.v_concurrency to the
+        dashboard, LibreChat, Langfuse and ClickStack.">
+        <defs>
+          <marker id="dvArrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+            <path class="dv-arrowhead" d="M0,0 L10,5 L0,10 Z"/>
+          </marker>
+          <marker id="dvArrowStrong" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+            <path class="dv-arrowhead-strong" d="M0,0 L10,5 L0,10 Z"/>
+          </marker>
+        </defs>
+
+        <path class="dv-edge" d="M540,66 L410,92"/>
+        <path class="dv-edge" d="M540,66 L690,92"/>
+        <path class="dv-edge" d="M410,138 L540,164"/>
+        <path class="dv-edge" d="M540,210 L183,244"/>
+        <path class="dv-edge" d="M540,210 L539,244"/>
+        <path class="dv-edge" d="M540,210 L895,244"/>
+        <path class="dv-edge-dashed" d="M350,138 L370,332"/>
+        <path class="dv-edge-dashed" d="M750,138 L710,332"/>
+        <path class="dv-edge" d="M183,306 L183,404"/>
+        <path class="dv-edge" d="M539,306 L540,404"/>
+        <path class="dv-edge" d="M895,306 L895,404"/>
+        <path class="dv-edge-dashed" d="M370,378 L370,404"/>
+        <path class="dv-edge-dashed" d="M710,378 L710,404"/>
+        <path class="dv-edge-strong" d="M540,444 L540,470"/>
+        <path class="dv-edge" d="M540,520 L141,550"/>
+        <path class="dv-edge" d="M540,520 L407,550"/>
+        <path class="dv-edge" d="M540,520 L673,550"/>
+        <path class="dv-edge" d="M540,520 L939,550"/>
+
+        <text class="dv-label dv-label-left" x="25" y="230">Three independent paths</text>
+        <text class="dv-label dv-label-left" x="25" y="320">Checked independently</text>
+        <text class="dv-label dv-label-left" x="25" y="538">Four consumer surfaces</text>
+
+        <rect class="dv-box" x="410" y="20" width="260" height="46" rx="8"/>
+        <text class="dv-title" x="540" y="40">Raw CSVs</text>
+        <text class="dv-sub" x="540" y="55">events + content metadata</text>
+
+        <rect class="dv-box" x="280" y="92" width="260" height="46" rx="8"/>
+        <text class="dv-title" x="410" y="112">raw_events</text>
+        <text class="dv-sub" x="410" y="127">MergeTree, partitioned by day</text>
+
+        <rect class="dv-box" x="560" y="92" width="260" height="46" rx="8"/>
+        <text class="dv-title" x="690" y="112">content_meta &rarr; content_dict</text>
+        <text class="dv-sub" x="690" y="127">dictionary enrichment, not a join</text>
+
+        <rect class="dv-box" x="410" y="164" width="260" height="46" rx="8"/>
+        <text class="dv-title" x="540" y="184">active_intervals</text>
+        <text class="dv-sub" x="540" y="199">playing AND foregrounded AND fresh</text>
+
+        <rect class="dv-box" x="20" y="244" width="326" height="62" rx="8"/>
+        <text class="dv-title dv-title-sm" x="183" y="269">session_minutes &rarr; minute_occupancy</text>
+        <text class="dv-sub" x="183" y="286">primary path, one row per session-minute</text>
+
+        <rect class="dv-box" x="376" y="244" width="326" height="62" rx="8"/>
+        <text class="dv-title" x="539" y="269">minute_deltas</text>
+        <text class="dv-sub" x="539" y="286">second path, signed &plusmn;1, windowed cumsum</text>
+
+        <rect class="dv-box" x="732" y="244" width="326" height="62" rx="8"/>
+        <text class="dv-title" x="895" y="269">maxIntersections</text>
+        <text class="dv-sub" x="895" y="286">oracle, arithmetic, no rollup</text>
+
+        <rect class="dv-box" x="220" y="332" width="300" height="46" rx="8"/>
+        <text class="dv-title" x="370" y="352">Python reference</text>
+        <text class="dv-sub" x="370" y="367">reads the CSV, owes ClickHouse nothing</text>
+
+        <rect class="dv-box" x="560" y="332" width="300" height="46" rx="8"/>
+        <text class="dv-title" x="710" y="352">chDB</text>
+        <text class="dv-sub" x="710" y="367">same SQL files, in process, no server</text>
+
+        <rect class="dv-badge" x="140" y="404" width="800" height="40" rx="20"/>
+        <text class="dv-badge-text" x="540" y="429">12 checks diff all five paths</text>
+
+        <rect class="dv-box dv-box-on" x="400" y="470" width="280" height="50" rx="8"/>
+        <text class="dv-title dv-title-on" x="540" y="492">marts.v_concurrency</text>
+        <text class="dv-sub" x="540" y="507">one parameterized view, budgeted role</text>
+
+        <rect class="dv-box" x="20" y="550" width="242" height="50" rx="8"/>
+        <text class="dv-title" x="141" y="572">Dashboard</text>
+        <text class="dv-sub" x="141" y="587">clickliv.vercel.app/dashboard</text>
+
+        <rect class="dv-box" x="286" y="550" width="242" height="50" rx="8"/>
+        <text class="dv-title" x="407" y="572">LibreChat</text>
+        <text class="dv-sub" x="407" y="587">plain language, via MCP tools</text>
+
+        <rect class="dv-box" x="552" y="550" width="242" height="50" rx="8"/>
+        <text class="dv-title" x="673" y="572">Langfuse</text>
+        <text class="dv-sub" x="673" y="587">every model and tool call traced</text>
+
+        <rect class="dv-box" x="818" y="550" width="242" height="50" rx="8"/>
+        <text class="dv-title" x="939" y="572">ClickStack</text>
+        <text class="dv-sub" x="939" y="587">pipeline spans, query_log facts</text>
+      </svg>
+      </div>
+
+      <div class="diagram-stack">
+        <div class="dv-step"><div class="dv-tile"><b>Raw CSVs</b><span>events + content metadata</span></div></div>
+        <div class="dv-down">&darr;</div>
+        <div class="dv-step"><div class="dv-tile"><b>raw_events</b><span>MergeTree, partitioned by day</span></div></div>
+        <div class="dv-down">&darr;</div>
+        <div class="dv-step"><div class="dv-tile"><b>content_meta &rarr; content_dict</b><span>dictionary enrichment, not a join</span></div></div>
+        <div class="dv-down">&darr;</div>
+        <div class="dv-step"><div class="dv-tile"><b>active_intervals</b><span>playing AND foregrounded AND fresh</span></div></div>
+        <div class="dv-down">&darr;</div>
+        <div class="dv-group-label">Three independent paths</div>
+        <div class="dv-branch">
+          <div class="dv-tile"><b>session_minutes &rarr; minute_occupancy</b><span>primary path</span></div>
+          <div class="dv-tile"><b>minute_deltas</b><span>second path, signed &plusmn;1, windowed cumsum</span></div>
+          <div class="dv-tile"><b>maxIntersections</b><span>oracle, arithmetic, no rollup</span></div>
+        </div>
+        <div class="dv-group-label">Checked independently</div>
+        <div class="dv-branch">
+          <div class="dv-tile"><b>Python reference</b><span>reads the CSV, owes ClickHouse nothing</span></div>
+          <div class="dv-tile"><b>chDB</b><span>same SQL files, in process, no server</span></div>
+        </div>
+        <div class="dv-down">&darr;</div>
+        <div class="dv-step"><div class="dv-badge-mobile">12 checks diff all five paths</div></div>
+        <div class="dv-down">&darr;</div>
+        <div class="dv-step"><div class="dv-tile on"><b>marts.v_concurrency</b><span>one parameterized view, budgeted role</span></div></div>
+        <div class="dv-down">&darr;</div>
+        <div class="dv-group-label">Four consumer surfaces</div>
+        <div class="dv-fan">
+          <div class="dv-tile"><b>Dashboard</b><span>clickliv.vercel.app/dashboard</span></div>
+          <div class="dv-tile"><b>LibreChat</b><span>plain language, via MCP tools</span></div>
+          <div class="dv-tile"><b>Langfuse</b><span>every model and tool call traced</span></div>
+          <div class="dv-tile"><b>ClickStack</b><span>pipeline spans, query_log facts</span></div>
+        </div>
+      </div>
     </div>
 
     <div class="steps">
@@ -366,7 +538,7 @@
       <div class="tool"><span class="mk mono">CS</span><div><b>ClickStack</b><span>A span per stage, ingest and query</span></div></div>
       <div class="tool"><span class="mk mono">Lf</span><div><b>Langfuse</b><span>Every model and tool call traced</span></div></div>
       <div class="tool"><span class="mk mono">LC</span><div><b>LibreChat</b><span>The conversational surface</span></div></div>
-      <div class="tool"><span class="mk mono">MC</span><div><b>MCP</b><span>Pre-vetted tools over curated marts</span></div></div>
+      <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@16.28.0/icons/modelcontextprotocol.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>MCP</b><span>Pre-vetted tools over curated marts</span></div></div>
       <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/googlegemini.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>Google AI Studio</b><span>Gemini, the model behind the desk</span></div></div>
       <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/amazonwebservices.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>AWS EC2</b><span>The box the self-hosted surfaces run on</span></div></div>
       <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/caddy.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>Caddy</b><span>Real TLS on sslip.io, no domain bought</span></div></div>
