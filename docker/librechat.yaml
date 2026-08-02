@@ -9,7 +9,7 @@ registration:
   socialLogins: []
 
 modelSpecs:
-  enforce: false
+  enforce: true
   prioritize: true
   list:
     - name: clickliv-concurrency-desk
