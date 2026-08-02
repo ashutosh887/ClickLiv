@@ -19,13 +19,29 @@ bind again where the container is not in the way.
 
 ## Nothing here is baked in against one dataset
 
-The accepted filter values are read out of `marts.v_dimension_values` at runtime, held
-for five minutes, and re-read immediately whenever a value misses, so a replacement
-dataset with new platforms needs no code change and no redeploy. The JSON schema each
-tool advertises has its `enum` filled from that same read at `tools/list` time rather
-than from a list in the source. There is no hardcoded content id, no hardcoded
+The dimension names are not written down in the server at all. `discover` reads the
+`create_table_query` of `marts.v_occupancy_full` and `marts.v_concurrency_full`, takes
+the `{name:String}` parameters both of them declare, and that intersection is the filter
+set; if the read fails it falls back to the distinct dimensions in
+`marts.v_dimension_values`, so a half applied schema narrows the surface rather than
+breaking every query on it. The accepted values are read out of `marts.v_dimension_values`
+at runtime, held for a minute, and re-read immediately whenever a value misses, so a
+replacement dataset with new platforms needs no code change and no redeploy. The JSON
+schema each tool advertises has its `enum` filled from that same read at `tools/list` time
+rather than from a list in the source. There is no hardcoded content id, no hardcoded
 dimension value, no assumed time window and no assumed cardinality anywhere in the
 server; every window comes from `marts.v_data_window` and every value from the data.
+
+That stopped being an argument and became a measurement when the sealed dataset landed.
+It carries two dimensions the tuning extract never had, `video_resolution` on the raw
+events and `show_name` on the content catalogue, so the marts views went from eight
+filterable dimensions to ten. Not one line of `src/clickliv/mcp.py` changed. Against the
+graded data `list_dimensions` reports ten dimensions rather than eight, `video_resolution`
+with 1,839 distinct values and `show_name` with 360; both are filter arguments of
+`concurrency_peak` and `concurrency_series`, and both appear in the `dimension` enum
+`top_slices` ranks by, because those schemas are built from the view signature at list
+time. A real schema change proved the claim that a rehearsed demo would only have
+asserted.
 
 ## A question has to answer itself
 
@@ -52,9 +68,11 @@ evidence that it would be safe to serve is in `evidence/user_level.txt`.
 Values match case insensitively, with two deliberate subtleties. An exact value always
 wins, so `hin` and `HIN` stay two different real slices of `audio_language`. The case
 fold only applies when the value matches nothing exactly, so `LIVE` still finds `live`.
-And the fold now refuses when it would land on more than one real value, so a third
-casing such as `Hin` matches nothing at all instead of quietly merging both and turning
-the 1,614 headline into 1,899. Refusing is the honest answer there, and it matches how
+And the fold refuses when it would land on more than one real value. The graded data
+holds three casings of the same language code, `hin` at a peak of 11,255, `HIN` at 833
+and `Hin` at 1, each an exact value that answers for itself; a fourth casing such as
+`hIn` matches nothing at all rather than quietly merging the three and reporting 11,990
+where the headline is 11,255. Refusing is the honest answer there, and it matches how
 the rest of the surface behaves.
 
 `list_dimensions` returns both the accepted values and the window the data actually
@@ -62,6 +80,19 @@ covers, in epoch minutes and in UTC. The dataset is a fixed historical extract, 
 range built from `now()` finds nothing; the tool description says so, and both sets of
 `serverInstructions` tell the model to resolve relative phrases such as "last week"
 against the last minute the data holds rather than against today.
+
+The graded data made that window two windows, and the answer reports both rather than
+picking the flattering one. The full extent of every row as loaded runs from
+2014-12-31 18:31 to 2026-08-03 11:26 UTC, 4,232.7 days, because a handful of sessions
+carry stray timestamps and every one of them is loaded as given. The traffic is one day:
+2026-07-31 carries 785 of the 4,145 minutes that hold sessions and every concurrency
+worth the name, peaking at 22,175. So `list_dimensions` states the full extent first and
+then names that day, in the same answer, and tells the model to treat it as the window a
+question means unless the question names another. Nothing is filtered to make the two
+agree. `marts.v_data_window` publishes the same pair as `min_utc` to `max_utc` beside
+`dense_min_utc` to `dense_max_utc`, with `outlier_minutes` 3,360 and `outlier_rows` 9,200
+counting exactly what falls outside the dense window, so the strays are a published
+number rather than a deletion.
 
 A question about a named programme goes through the `title` argument on
 `concurrency_peak` and `concurrency_series`, which resolves the title against
@@ -100,19 +131,20 @@ The role and the settings profile behind those refusals are described in
 
 ## What the marts database publishes
 
-The MCP tools read `v_concurrency`, `v_occupancy_minute`, `v_data_window`,
-`v_dimension_values`, `v_titles` and `v_overcount`. The rest exist so that a model
-exploring the schema on the escape hatch learns the conventions instead of guessing
-them, and every view and column carries a ClickHouse `COMMENT`, so `SHOW CREATE` and
-`DESCRIBE` teach the call syntax and the sentinel rule.
+The MCP tools read `v_concurrency_full`, `v_occupancy_full`, `v_data_window`,
+`v_dimension_values`, `v_titles` and `v_overcount`, the full pair rather than the short
+one, which is why a dimension added to the schema reaches chat. The rest exist so that
+a model exploring the schema on the escape hatch learns the conventions instead of
+guessing them, and every view and column carries a ClickHouse `COMMENT`, so `SHOW CREATE`
+and `DESCRIBE` teach the call syntax and the sentinel rule.
 
 | view | what it is for |
 | --- | --- |
 | `v_occupancy_minute` | per-minute concurrency, the four common dimensions, six parameters |
 | `v_concurrency` | the same bucketed to a grain, seven parameters |
-| `v_occupancy_full` | all eight sort key dimensions, eleven parameters |
-| `v_concurrency_full` | all eight plus a grain, twelve parameters |
-| `v_data_window` | the window the data covers, in epoch minutes and UTC |
+| `v_occupancy_full` | all ten sort key dimensions, thirteen parameters |
+| `v_concurrency_full` | all ten plus a grain, fourteen parameters |
+| `v_data_window` | the full extent and the dense window, in epoch minutes and UTC |
 | `v_dimension_values` | every value every string dimension takes |
 | `v_titles` | every content_id that carries sessions, with its title |
 | `v_naive_vs_foreground` | the foreground count against the naive one, minute by minute |
@@ -122,20 +154,29 @@ them, and every view and column carries a ClickHouse `COMMENT`, so `SHOW CREATE`
 The shorter pair is kept separate rather than widened because the Vercel functions,
 the Cloud dashboard and this MCP server all call it with six parameters, and a
 ClickHouse parameterized view has no defaults, so widening the signature in place
-would break every caller the moment the SQL is applied.
+would break every caller the moment the SQL is applied. The sealed dataset was the test
+of that decision: `v_occupancy_full` and `v_concurrency_full` grew two parameters each
+for `video_resolution` and `show_name`, and every six-parameter caller kept working
+untouched, because the short view passes the empty sentinel for the dimensions it does
+not expose.
 
 `dimension_value` exists for one reason. The case-fold fallback has to ask whether a
 value exists exactly, and asking that of `minute_occupancy` costs a full scan of the
-serving table once per filtered dimension: 96,818 rows with no filters, 871,362 with all
-eight, one further scan of the fact table per predicate. That cancels out the read
-advantage the whole design exists to demonstrate. Resolving against the small table
-instead makes the cost flat in the number of filters, 97,043 rows at zero filters and
-98,393 at eight.
+serving table once per filtered dimension, one further scan of the fact table per
+predicate. The whole comparison below was measured on the tuning extract, whose serving
+table holds 96,818 rows; it is the shape that carries over to the graded data and its
+704,123, not the digits. Before the small table existed, eight filters read 871,362 rows,
+exactly nine passes over that table, which cancels out the read advantage the whole design
+exists to demonstrate. Resolving against the small table instead makes the cost flat in
+the number of filters: 97,043 rows at zero filters and 99,968 at eight, so eight resolved
+filters cost 2,925 extra rows rather than another pass over the fact table for each of
+them.
 
-The after figures are measured rather than restated here, one table for the whole
-project: `evidence/read_cost_by_filter_count.txt` carries every row with the `query_id`
-the client generated before the query ran, so each one can be looked up in
-`system.query_log` and checked. [scale.md](scale.md#the-serving-layers-read-cost-tracks-the-rollup-not-the-raw-event-count)
+The figures are measured rather than restated here, one table for the whole project:
+`evidence/read_cost_by_filter_count.txt` carries every row with the `query_id` the client
+generated before the query ran, so each one can be looked up in `system.query_log` and
+checked, and it names the dataset each row was measured on.
+[scale.md](scale.md#the-serving-layers-read-cost-tracks-the-rollup-not-the-raw-event-count)
 reads that file and makes the flatness argument in full.
 
 `v_dimension_values` deliberately carries no concurrency figure. A peak per value has
@@ -143,17 +184,23 @@ to sum across the other dimensions before the maximum is taken, and a `GROUP BY`
 would take the maximum first and publish a number that is quietly too small. Peaks per
 value come from `top_slices` or from the concurrency views with the dimension
 filtered. It also leaves out the empty value on purpose: `video_type` genuinely holds
-one, carrying 455 minutes and a peak of 92, but the empty string is also the no-filter
+one, carrying 491 minutes and a peak of 674, but the empty string is also the no-filter
 sentinel, so passing it back as a filter returns the whole dataset rather than that
 slice. Publishing it as selectable was a trap on our own data and would be a worse one
 on a dataset nobody has read yet.
 
 `v_overcount` puts the project's headline claim behind a query instead of behind
-prose, and the `overcount` tool puts it one call away in chat: 3,743 naive against
-2,692 foreground, 39.0% on the peak and 49.0% on the average, and the two peaks land in
-different minutes. Asked in chat how much counting every open session would overcount,
-the model reads that one row from the guardrailed surface, with no SQL and no escape
-hatch involved.
+prose, and the `overcount` tool puts it one call away in chat: 24,196 naive against
+22,175 foreground, 9.1% on the peak and 90.1% on the average. The gap between those two
+percentages is the whole lesson. At the busiest minute almost every session with the app
+open is also in the foreground, so a naive count is only 9.1% high and lands on the same
+minute, 2026-07-31 11:16 UTC; across the day it charges every session for every minute
+between its first event and its last, 23.2 charged minutes for the average session
+against the 12.2 minutes that session actually spent in the foreground, and the average
+overstates by 90.1%. A naive count is therefore least wrong exactly where a capacity
+planner looks and worst wrong everywhere else. Asked in chat how much counting every open
+session would overcount, the model reads that one row from the guardrailed surface, with
+no SQL and no escape hatch involved.
 
 ## Every answer carries its own receipt
 
@@ -176,7 +223,11 @@ Proven in a real browser rather than argued. A fresh login, `/c/new`, nothing to
 in the picker, one question typed. The request the client sent carried
 `spec: clickliv-concurrency-desk` and `mcp: ["clickliv-marts","clickhouse-official"]`,
 the picker read "2 selected", and the answer was 2,692 at 2026-07-26 10:56 UTC from
-`concurrency_peak`. The residual gap is a conversation created before the spec existed,
+`concurrency_peak`. That session was driven before the sealed dataset replaced the tuning
+extract, so 2,692 is what the data held on the day of the run and the figure is not
+restated here as a current one; the same call on the graded data answers 22,175 at
+2026-07-31 11:16 UTC. What the run establishes is the wiring, which the swap did not
+touch. The residual gap is a conversation created before the spec existed,
 which stores no spec and therefore gets neither the pinned tools nor the prompt. Start a
 new chat, which is what the demo does anyway.
 

@@ -34,46 +34,60 @@ heartbeat-fresh. All three, because no single signal is sufficient on this data:
 
 | Signal | Why it alone is not enough |
 |---|---|
-| Explicit background and foreground markers | Not guaranteed. 407 sessions carry an unmatched `AppBackgrounded`, 45 a foreground with no preceding background, 344 end backgrounded. |
-| Heartbeat gaps | Telemetry keeps flowing during pause. 79.4% of pause windows over 60s contain other telemetry, 314,277 events. A gap rule sees those as alive. |
+| Explicit background and foreground markers | Not guaranteed. 9,008 sessions carry an unmatched `AppBackgrounded`, 1,148 a foreground with no preceding background, 9,306 end backgrounded. |
+| Heartbeat gaps | Telemetry keeps flowing during pause. Of the 14,626 pause windows that run past 60s, 79.4% contain other telemetry, 91,043 events. A gap rule sees those as alive. |
 | Explicit pause and resume | Also not guaranteed, and a session can die silently without ever pausing. |
 
 Segments close on pause, background, error, session end, session restart, and on any gap
 over the threshold. They reopen on play, resume, and foreground while playing.
 
 **Pause is excluded from active time.** The question is who is watching, not who has the
-app open. That is a design choice worth 27,340 pause events, so it is stated rather than
+app open. That is a design choice worth 98,703 pause events, so it is stated rather than
 buried, and it is one predicate to flip.
 
 ## Where the data dictionary is wrong
 
-Everything below is measured, not inferred, and reproducible from this repo.
+Everything below is measured against the graded dataset now loaded in `clickliv`, not
+inferred, and reproducible from this repo.
 
 **The heartbeat is 40s, not the documented 60s.** Four telemetry streams sit at a p90 of
-exactly 40.0s. Every liveness threshold derives from that number, so the tail grace is one
-cadence and the gap threshold is 2.25 cadences.
+exactly 40.0s, and the graded day measures the same 40.0s, which is what a sealed drop
+with unchanged event semantics owes. Every liveness threshold derives from that number, so
+the tail grace is one cadence and the gap threshold is 2.25 cadences.
 
-**`event_type='VideoHeartbeat'` is a bucket of 41 distinct `event` values**, not a periodic
+**`event_type='VideoHeartbeat'` is a bucket of 42 distinct `event` values**, not a periodic
 beat. It carries the playback-state markers: `pause`, `resume`, `speed-pause`, `AdPause`.
 There is no `VideoPause` event type, so any rule keyed only on `event_type` cannot exclude
 paused time, which is one of the three exclusions this track is scored on.
 
-**Dimensions are unstable inside sessions.** `subtitle_language` changes within 99.97% of
-sessions and `audio_language` within 81%. `any(dim) GROUP BY session` therefore fabricates
-a label for most sessions. The tuple is resolved per `(session, minute)` with `argMax` on
-event order, which also guarantees exactly one tuple per session per minute.
+**Dimensions are unstable inside sessions.** `subtitle_language` changes within 79.0% of
+sessions and `audio_language` within 47.2%, against 99.97% and 81% on the tuning extract.
+Either way `any(dim) GROUP BY session` fabricates a label for most sessions. The tuple is
+resolved per `(session, minute)` with `argMax` on event order, which also guarantees
+exactly one tuple per session per minute.
 
-**The span is 11.8 days, not one**, so `PARTITION BY tuple()` is not appropriate.
+**The window has to be reported twice, and `PARTITION BY tuple()` is exactly the wrong
+answer to it.** The full extent of the graded data runs from 2014-12-31 18:31 to
+2026-08-03 11:26, 4232.7 days, because a handful of sessions carry stray timestamps. The
+dense window, the span of the calendar days carrying at least one percent of the session
+minutes, is a single day: 2026-07-31, 0.999 days, with 3,360 outlier minutes and 9,200
+outlier rows sitting outside it. Nothing is filtered; `marts.v_data_window` publishes both
+readings so the strays are a number rather than a deletion. One partition holding one dense
+day and twelve years of strays is the case unpartitioned storage handles worst, so
+partitioning by day is more justified on this data than it was on the extract, not less.
 
-**161,660 events share a timestamp with another event in the same session, and 6,058 of
-those collisions carry conflicting state effects.** Order within a millisecond changes the
-answer, so it is fixed by an explicit rule rather than left to insertion order:
+**1,502,588 (session, timestamp) groups hold more than one event, 1,864,015 rows beyond the
+first of each, and 739 of those groups carry conflicting state effects.** Order within a
+millisecond changes the answer, so it is fixed by an explicit rule rather than left to
+insertion order:
 deactivating events apply last. Both implementations sort by
 `(timestamp, kind, dimension tuple)`, which is a total order, and that is why the two agree
 exactly rather than approximately.
 
-**One content row carries a negative `content_id`** and is referenced by no event. The
-loader rejects it and says so, rather than widening the dictionary key to hide it.
+**A negative `content_id` is rejected at load rather than hidden.** The tuning extract
+carried exactly one such row, referenced by no event. The rule lives in the loader, not in
+a note about one dataset, so it holds on whatever lands next instead of widening the
+dictionary key to swallow it.
 
 ## Per-minute concurrency is additive across dimensions; peak is not additive across time
 
@@ -90,14 +104,16 @@ sum across excluded dimensions, then take the max over minutes.** Never max firs
 The problem statement gives its own worked example: "platform and a content might
 peak at one minute, while platform + country might reach its peak at an entirely
 different minute." `make crossover` reproduces it with real numbers through
-`marts.v_concurrency`, the served surface, not a hand-picked illustration:
-`evidence/dimension_crossover.txt` shows 4 distinct peak minutes across 5 real
-slices. D6 (filter, sum across excluded dims, then max over minutes, never max
-first) is why the served view gets this right automatically.
+`marts.v_concurrency`, the served surface, not a hand-picked illustration. The same five
+slices give 4 distinct peak minutes on the tuning extract and 2 on the graded day, where
+`platform=SONY_ANDROID_TV` peaks 45 minutes before every other slice. One slice is enough
+to break the assumption, and a single dense day gives the effect less room than twelve
+days did. D6 (filter, sum across excluded dims, then max over minutes, never max first) is
+why the served view gets this right automatically.
 
 ## Design notes
 
-**Dictionary, not join, for content enrichment.** 33,463 content rows, 3,357 of them
+**Dictionary, not join, for content enrichment.** 33,325 content rows, 15,094 of them
 referenced. A materialized view fires only on inserts to the left-most table of a join and
 freezes the right side at insert time, so content loaded after events would never be picked
 up. A dictionary makes the dependency explicit. Either way content must load first, and the
@@ -142,7 +158,7 @@ src/clickliv/instantaneous.py O3, instantaneous overlap beside occupancy, per sl
 src/clickliv/incremental.py   proves the incremental path agrees with a batch rebuild
 src/clickliv/crossover.py     the problem statement's dimension-crossover example
 src/clickliv/decline.py       optional: deterministic concurrency-decline alerting
-src/clickliv/llm.py           one optional LLM call, OpenAI first, Bedrock fallback
+src/clickliv/llm.py           one optional LLM call, Google first, OpenAI then Bedrock fallbacks
 src/clickliv/claims.py        re-reads every published figure live, names stale docs
 src/clickliv/mcp.py           the MCP server, five pre-vetted tools as marts_agent
 src/clickliv/ui.py            the minimal local concurrency dashboard

@@ -23,9 +23,18 @@ An empty string or a zero content_id means "no filter on this dimension", via
 `coalesce(nullIf({param}, ''), column)`. Filtering happens before the aggregation and
 the aggregation is always to `minute`, so D6 holds regardless of which dims are
 supplied: sum across whatever is left unfiltered, then take `max()` or `avg()` over
-minutes, never the reverse. Numbers from `marts.v_concurrency` match Gate A exactly:
-2,692 for the whole day, 1,704 for `platform = ANDROID_PHONE`, 425 for `video_type =
-live`.
+minutes, never the reverse.
+
+`v_concurrency` carries the four dimensions almost every caller filters on, because the
+dashboard, the Vercel functions and the MCP server all call it with six parameters and a
+parameterized view has no defaults. `v_concurrency_full` and `v_occupancy_full` take all
+eleven: the ten string dimensions plus `content_id`. Same expression, same D6 ordering,
+wider signature.
+
+Numbers from `marts.v_concurrency` match Gate A exactly on both loaded datasets. On the
+graded SonyLIV data in `clickliv`: 22,175 for the whole day, 6,513 for `platform =
+ANDROID_PHONE`, 10,314 for `video_type = live`. On the sample dataset in
+`clickliv_sample`: 2,710, 1,713 and 428.
 
 ## RBAC and the query budget
 
@@ -47,11 +56,14 @@ the MCP server is the client that runs as `marts_agent`.
 ## The sort key serves the one predicate the index can actually use
 
 `minute_occupancy` is sorted by `(minute, country, platform, video_type, category,
-app_version, player_version, audio_language, subtitle_language, content_id)`. Time
-leads, and that is not the obvious choice, so here is the measurement that forced it.
+app_version, player_version, audio_language, subtitle_language, content_id,
+video_resolution, show_name)`. Time leads, and that is not the obvious choice, so here is
+the measurement that forced it. `video_resolution` and `show_name` arrived with the graded
+data and were appended at the tail rather than inserted, which leaves every existing key
+prefix and every granule boundary where the earlier measurements found them.
 
 `EXPLAIN indexes = 1` on the served view is the whole argument. Every call into
-`marts.v_occupancy_minute` carries a minute range and any of the nine dimension filters,
+`marts.v_occupancy_minute` carries a minute range and any of the eleven dimension filters,
 and the index analyzer reports exactly one usable key:
 
 ```

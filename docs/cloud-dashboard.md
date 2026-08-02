@@ -3,25 +3,47 @@
 Six saved queries and one dashboard in the ClickHouse Cloud console, built by hand,
 because nothing in the Cloud API can build them for you.
 
-[`sql/09_dashboard.sql`](../sql/09_dashboard.sql) holds **seven** queries, one per
-`-- name:` label. Six are the dashboard, in the order below. The seventh,
-`occupancy_vs_instantaneous`, is the [optional seventh tile](#optional-seventh-tile) and
-is the first thing to cut. `./scripts/verify_dashboard.sh` runs all seven, so a run that
-reports seven results is correct and not a sign that a tile is missing.
+[`sql/09_dashboard.sql`](../sql/09_dashboard.sql) holds **eight** queries, one per
+`-- name:` label. Six are the dashboard, in the order below. The other two,
+`occupancy_vs_instantaneous` and `dimensions_available`, are the [optional
+tiles](#optional-tiles) and are the first things to cut.
+`./scripts/verify_dashboard.sh` runs all eight, so a run that reports eight results is
+correct and not a sign that a tile is missing.
 
 Org `DevSapiens`, service `ClickLiv`, region ap-south-1. Budget ten minutes.
 
 ## What the dashboard argues
 
-Counting every open session overstates peak concurrency by **39 percent** and puts the
-peak **three minutes late**. Naive counting says 3,743 at 10:59 UTC. Foreground-only
-occupancy says 2,692 at 10:56 UTC. Averaged across the whole window the overstatement
-is 49 percent.
+Counting every open session overstates average concurrency by **90.1 percent** and the
+peak by **9.1 percent**. Naive counting says 24,196 at 11:16 UTC. Foreground-only
+occupancy says 22,175, in that same minute. Across the dense day the two averages are
+1,703.2 naive against 895.9 foreground.
+
+The distance between those two percentages is the finding, and it is worth saying out
+loud before anyone reads a tile. 37,649 sessions, 34.7 percent of the file, never emit a
+`VideoSessionEnd`, so they are still open when the extract stops. A naive span count
+charges for every one of them from the moment it starts until the boundary, whatever the
+viewer was doing, and that inflates every minute of the day. At the busy minute itself
+almost everyone being counted is genuinely watching, so the peak barely moves. Counting
+the wrong thing costs a little at the top and a great deal everywhere else.
+
+| | Sample dataset | Graded dataset |
+| --- | --- | --- |
+| Foreground peak | 2,710 at 2026-07-26 10:56 UTC | 22,175 at 2026-07-31 11:16 UTC |
+| Naive peak | 3,743 at 2026-07-26 10:59 UTC | 24,196 at 2026-07-31 11:16 UTC |
+| Peak overcount | 38.1 percent | 9.1 percent |
+| Average overcount | 45.9 percent | 90.1 percent |
+| Sessions with no `VideoSessionEnd` | none | 37,649, 34.7 percent |
+
+The tuning extract closed every session it opened, which is why its peaks landed three
+minutes apart and its average overcount stayed near its peak one. Both readings are
+correct about their own data. The dashboard is built on the graded one, and every
+expected value printed further down this page is the graded reading.
 
 The six tiles are ordered to make that argument and then defend it: state the claim,
-draw the claim, give the answer on its own, show where the load came from, show the
-timing crossover, and prove it serves fast. A judge who reads only the top of the page
-still gets the point.
+draw the claim, give the answer on its own, show where the load came from, show how the
+mix moves through the event, and prove it serves fast. A judge who reads only the top of
+the page still gets the point.
 
 ## Why this is a runbook and not a script
 
@@ -108,11 +130,13 @@ SELECT
 FROM marts.v_overcount;
 ```
 
-Expect 1 row: `2692`, `2026-07-26 10:56:00`, `3743`, `2026-07-26 10:59:00`, `39`, `49`.
+Expect 1 row: `22175`, `2026-07-31 11:16:00`, `24196`, `2026-07-31 11:16:00`, `9.1`,
+`90.1`.
 
 **Visualization type: Table.** Six columns and one row. Big Stat renders a single value,
-so it would drop the two peak timestamps, and those timestamps landing three minutes
-apart are half the point of the tile.
+so it would drop everything except one of them, and this tile needs three things read
+together: the two peaks landing in the same minute, the small peak overcount, and the
+large average overcount beside it.
 
 ### 2. naive_vs_foreground
 
@@ -125,15 +149,27 @@ FROM marts.v_naive_vs_foreground
 ORDER BY minute;
 ```
 
-Expect 5,255 rows. Naive peaks at 3,743 at 10:59 UTC, foreground at 2,692 at 10:56 UTC.
-The naive series is above or equal to foreground in every one of the 5,255 minutes and
-never below, which was checked rather than assumed.
+Expect 117,121 rows. Naive peaks at 24,196 and foreground at 22,175, both at 11:16 UTC
+on 2026-07-31.
 
-Expect this rather than debug it: foreground reads 0 across 1,606 of those minutes.
+Expect this rather than debug it: foreground reads 0 across 112,976 of those minutes.
 Those are minutes where every session spanning them is open but backgrounded, so a
 naive span count charges for them and foreground occupancy does not. That is the effect
-being measured. The remaining 3,649 minutes are exactly the row count of query 3, which
+being measured. The remaining 4,145 minutes are exactly the row count of query 3, which
 is a useful internal consistency check.
+
+Naive sits above foreground in all but **8** of the 117,121 minutes, which was checked
+rather than assumed, and the eight are worth knowing about because
+`verify_dashboard.sh` reports them as `minutes_naive_below_foreground`. Six are isolated
+outlier minutes carrying a single session. The other two are 11:30 and 11:31 on the
+graded day, where foreground reads 18,080 against a naive 1,024. Both come from the same
+mechanism: the naive series stops at a session's last event, while sessionization
+extends an active interval by the 40 second grace window past that event, so a session
+whose final heartbeat lands just before a minute boundary occupies the next minute in
+foreground and not in naive. At the boundary of the extract, where 20,553 sessions send
+their last event inside the single minute 11:29, that grace tail is visible on the
+chart. It is a property of the grace window, not a rollup error, and it is confined to
+the two minutes after the data stops.
 
 **Visualization type: Line.** Two series on one pair of axes. The editor gives every
 column three toggles, X, Y and Dimension. Set them exactly like this:
@@ -186,13 +222,23 @@ The only structural difference between this query and the tiles that work is the
 identifier followed by an argument list in `FROM`. That is also what a table function
 looks like, which is why tile 6 had to change too.
 
-The replacement above was checked row for row against the parameterized version: both
-return 3,649 rows and both peak at 2,692 on 2026-07-26 10:56 UTC, and the two result sets
-are identical.
+The replacement above was checked row for row against the parameterized version on the
+graded data: both return 4,145 rows and both peak at 22,175 on 2026-07-31 11:16 UTC, and
+a full outer join of the two result sets on minute and concurrency leaves nothing
+unmatched on either side.
 
-Expect 3,649 rows. Starts at 1 on 2026-07-14 15:43 UTC, stays low for most of the
-window, climbs to a single sharp spike on 2026-07-26 topping out at **2,692** at 10:56
-UTC, and falls to 7 by 11:30 UTC. If the peak reads 2,692 the tile is correct.
+Expect 4,145 rows. The x axis runs the full extent of the file, 2014-12-31 18:31 UTC to
+2026-08-03 11:26 UTC, because the tile filters nothing. 3,360 of those minutes are
+scattered outliers spread over eleven years, none of them above 22 sessions. The other
+785 fall on 2026-07-31, where the curve sits in single digits overnight, reaches 72 by
+09:00, then goes vertical: 21,711 inside the 10:00 hour, **22,175** at 11:16, and back
+to 29 by 11:31 and 7 by 11:35. If the peak reads 22,175 the tile is correct.
+
+So the tile renders as a flat line with one needle in it. That is the honest shape of
+this file and not a rendering fault. Say the two windows out loud when the tile is on
+screen: the full extent is 4,232.7 days, the dense window where the sessions actually
+live is one day, and `marts.v_data_window` publishes both, `min_utc` and `max_utc`
+beside `dense_min_utc` and `dense_max_utc`.
 
 **Visualization type: Area.** Two columns, one series:
 
@@ -221,10 +267,18 @@ GROUP BY platform
 ORDER BY peak_concurrency DESC;
 ```
 
-Expect 10 rows. `ANDROID_PHONE` leads at **1,704**, then IPHONE 329, SONY_ANDROID_TV
-279, JIO_ANDROID_TV 210, Mweb 67, SAMSUNG_HTML_TV 52, ANDROID_TAB 44, FIRE_TV 38,
-XIAOMI_ANDROID_TV 37, LG_HTML_TV 22. One tall bar and a long tail. The ten per-platform
-peaks sum to more than 2,692 because platforms peak in different minutes, which is the
+Expect 21 rows. `ANDROID_PHONE` leads at **6,513**, with JIO_ANDROID_TV a close second at
+6,490, then SONY_ANDROID_TV 3,308, SAMSUNG_HTML_TV 1,171, Web 1,017, FIRE_TV 994,
+LG_HTML_TV 906, IPHONE 715, XIAOMI_ANDROID_TV 689, ANDROID_TAB 287, IPAD 168,
+SONY_HTML_TV 140, Mweb 113, SKYWORTH_HTML_TV 111, VIDAA_HTML_TV 107, APPLE_TV 41,
+KEPLER_HTML_TV 10, and MWEB, NETRANGE_HTML_TV, ROKU_TV and WEB at 2 each. Two tall bars
+and a long tail. `Web` and `WEB` are separate rows, as are `Mweb` and `MWEB`; the source
+data carries both casings and the tile groups on the stored value rather than folding
+them, so leave them apart.
+
+The 21 per-platform peaks sum to 22,788, more than the 22,175 headline, because
+platforms peak in different minutes: ANDROID_PHONE and IPHONE top out with the headline
+at 11:16, while JIO_ANDROID_TV and SONY_ANDROID_TV both peaked around 10:31. That is the
 same effect the dashboard is about, one level down.
 
 **Visualization type: Bar Chart.** Three columns, only two of them plotted:
@@ -237,9 +291,9 @@ same effect the dashboard is about, one level down.
 
 `peak_at` stays in the underlying data without being plotted. Dimension is tempting on
 `platform` here and it is still wrong: `platform` is already the x axis, and splitting
-the one measure by it as well asks for ten single-bar series. If the ten labels crowd
-each other at half width, switch to Horizontal bar, which gives the platform names room
-to read.
+the one measure by it as well asks for 21 single-bar series. 21 labels will crowd each
+other at half width, so switch to Horizontal bar, which gives the platform names room to
+read.
 
 ### 5. peak_by_video_type
 
@@ -262,15 +316,19 @@ Expect 3 rows:
 
 | video_type | peak_concurrency | peak_at |
 | --- | --- | --- |
-| vod | 2222 | 2026-07-26 11:02:00 |
-| live | 425 | 2026-07-26 10:42:00 |
-| (empty) | 92 | 2026-07-26 11:00:00 |
+| vod | 13249 | 2026-07-31 10:31:00 |
+| live | 10314 | 2026-07-31 11:16:00 |
+| (empty) | 674 | 2026-07-31 11:28:00 |
 
-This is the crossover, and it is why the tile is a table rather than a bar chart. Live
-peaks 20 minutes before vod. The audience arrives for the live event, the live stream
-tops out at 10:42, and vod carries the load to a much higher peak at 11:02. The third
-row has an empty `video_type` and is a real property of the source data rather than a
-bug. Leave it in.
+This is the crossover, and it is why the tile is a table rather than a bar chart. **Vod
+peaks 45 minutes before live**, which is the reverse of the ordering the sample showed,
+and the reversal was expected: the sentence this page used to carry warned that the
+ordering was a property of that extract rather than a law. On the graded day vod tops
+out first at 10:31, live keeps climbing, and live is what carries the headline minute at
+11:16. The two are also far closer in size than they were, 13,249 against 10,314, so the
+event is genuinely a mixed one rather than a vod library with a live stream attached.
+The third row has an empty `video_type` and is a real property of the source data rather
+than a bug. Leave it in.
 
 **Visualization type: Table.** A bar chart would plot the two peak heights and silently
 drop `peak_at`, and `peak_at` is the entire finding here. Resist Pie in particular: these
@@ -281,19 +339,24 @@ untrue.
 
 ```sql
 SELECT
-    hostName() AS replica,
-    (SELECT count() FROM system.clusters WHERE cluster = 'default') AS replicas_in_service,
+    if(query ILIKE '%UNION ALL%', 'multi slice batch', 'single slice serve') AS query_shape,
     count() AS queries,
     quantileExact(0.50)(query_duration_ms) AS p50_ms,
     quantileExact(0.95)(query_duration_ms) AS p95_ms,
     quantileExact(0.99)(query_duration_ms) AS p99_ms,
-    max(query_duration_ms) AS max_ms,
-    max(read_rows) AS max_read_rows
+    round(100 * countIf(query_duration_ms <= 100) / count(), 1) AS pct_within_100ms,
+    max(read_rows) AS max_read_rows,
+    hostName() AS replica,
+    (SELECT count() FROM system.clusters WHERE cluster = 'default') AS replicas_in_service,
+    min(event_time) AS log_from,
+    max(event_time) AS log_to
 FROM system.query_log
 WHERE type = 'QueryFinish'
   AND is_initial_query = 1
   AND query NOT ILIKE '%system.query_log%'
-  AND (query ILIKE '%marts.v_concurrency%' OR query ILIKE '%marts.v_occupancy_minute%');
+  AND (query ILIKE '%marts.v_concurrency%' OR query ILIKE '%marts.v_occupancy%')
+GROUP BY query_shape, replica, replicas_in_service
+ORDER BY queries DESC;
 ```
 
 **This tile used to read `clusterAllReplicas` and it would have failed.** On Cloud the
@@ -302,37 +365,53 @@ is the `clusterAllReplicas` table function. That is the exact shape tile 3 prove
 refuses, so it would have rendered Forbidden in front of the judges for reasons that had
 nothing to do with the numbers. It reads the local log instead.
 
-What that costs is small and was measured rather than waved away. The two replicas carry
-the same story: 584 and 596 matching queries, p50 29 ms on both, p95 71 and 72 ms. So a
-single replica is a fair sample, and `replicas_in_service` still puts the size of the
-service on the tile by reading `system.clusters`, which is a plain table.
+**It also used to pool two workloads under one number, which was the worse problem.** A
+single-slice serve and an agent's multi-slice comparison are different queries with
+different costs, and averaging them produced a p99 that described neither. The
+`query_shape` split is what the `GROUP BY` is for, and it is why the tile now returns two
+rows.
 
-Expect 1 row with `replicas_in_service = 2`, several hundred queries and rising, p50
-around 29 ms, p95 around 70 ms, p99 between 150 and 350 ms, and `max_ms` under a second.
+Reading one replica costs little and that was measured rather than waved away. On the
+single-slice shape the two replicas carry the same story: 1,034 and 1,056 matching
+queries, p50 48 and 46 ms, p95 134 and 121 ms. The multi-slice row is a much smaller
+population, 34 and 35 queries, and it does diverge, p50 341 against 126 ms, so quote that
+row from the pooled form below rather than from the tile. `replicas_in_service` still puts
+the size of the service on the tile by reading `system.clusters`, which is a plain table.
+
+Expect 2 rows with `replicas_in_service = 2`. On 2026-08-02 one replica read `single
+slice serve` at 1,020 queries, p50 47 ms, p95 129 ms, p99 188 ms, 89 percent within 100
+ms, heaviest query 871,362 rows; and `multi slice batch` at 34 queries, p50 341 ms, p95
+2,489 ms, p99 2,804 ms, 20.6 percent within 100 ms, heaviest query 22,089,520 rows. Every
+one of those moves between runs and the query counts only climb, so treat them as the
+shape to expect rather than as values to match.
 
 **This tile's p99 is not the serving SLO, and a judge will notice.** The README publishes
-p99 58 ms and says the SLO passes with room. Both numbers are correct, because they are
-percentiles of two different populations, and the difference is the whole reason the SLO
-is measured the way it is.
+p99 124 ms against a 100 ms target and says, in as many words, that we miss it. This tile
+says 188 ms on the single-slice shape. Both are correct, because they are percentiles of
+two different populations, and the difference is the whole reason the SLO is measured the
+way it is.
 
 | | the SLO | this tile |
 | --- | --- | --- |
-| population | 40 samples, 8 benchmark queries x 5 repetitions, one controlled run | every query the service has ever run against the marts views |
-| includes | nothing else | cold starts after idle scaling, marts rebuilds, agent multi-slice comparisons reading 2.5 million rows, one replica's log only |
-| published in | `evidence/serving_slo.txt`, per-sample rows in `evidence/serving_slo.csv` | nowhere; it is a live operational tile |
+| population | 40 samples, 8 benchmark queries x 5 repetitions, one controlled run | every query the service has run against the marts views since the log window opened |
+| includes | nothing else | cold starts after idle scaling, marts rebuilds, agent multi-slice comparisons reading 22 million rows, one replica's log only |
+| reads | 717,218 rows on the unfiltered day-grain call | up to 871,362 rows single slice, 22,089,520 multi slice |
+| published in | `unseen/evidence/serving_slo.txt`, per-sample rows in `unseen/evidence/serving_slo.csv` | nowhere; it is a live operational tile |
 
-The SLO is the claim, because it is a fixed, repeatable, stated set of queries. The tile
-is the honest ambient picture of a shared service, and it is the more impressive of the
-two once it is read correctly. Say the median and the heaviest query out loud, not the
-p99: a median of 29 ms, and the heaviest query in the log reading 2.5 million rows in
-under a second.
+**Say the miss out loud rather than reaching for the tile.** The SLO is the claim,
+because it is a fixed, repeatable, stated set of queries, and on the graded data it reads
+p99 124 ms against our own 100 ms target and the evidence file records `FAIL`. The cause
+is measured and it is not the query: the service is holding 7.7 times the data it was
+tuned on while sitting at its 4 thread and 16 GiB Cloud floor. The tile is the ambient
+picture beside that claim, and what it adds is the distribution rather than a better
+headline: 89 percent of single-slice serves land within 100 ms, and the tail is the agent
+comparisons, which read 22 million rows and are not what the target was written about.
 
-Two more things before quoting the tile. The query count grows every time anyone touches
-the marts views and it counts one replica, so treat it as a floor. And the p99 is not a
-wake-up artefact: the slow tail is those multi-slice agent comparisons, which still land
-under 800 ms.
+One more thing before quoting the tile. The query count grows every time anyone touches
+the marts views and it counts one replica, so treat it as a floor, and read `log_from`
+and `log_to` to see what window the percentiles cover.
 
-**Visualization type: Table.** One row, eight columns, no time axis to plot.
+**Visualization type: Table.** Two rows, eleven columns, no time axis to plot.
 
 If `queries` comes back 0 the query log rotated. Query 3 no longer touches these views,
 so refill the log by asking the chat one question, or loading the Vercel dashboard, or
@@ -347,24 +426,30 @@ SQL Console, where table functions are allowed, if a judge asks:
 
 ```sql
 SELECT
+    if(query ILIKE '%UNION ALL%', 'multi slice batch', 'single slice serve') AS query_shape,
     uniqExact(hostName()) AS replicas_reporting,
     count() AS queries,
     quantileExact(0.50)(query_duration_ms) AS p50_ms,
     quantileExact(0.95)(query_duration_ms) AS p95_ms,
     quantileExact(0.99)(query_duration_ms) AS p99_ms,
+    round(100 * countIf(query_duration_ms <= 100) / count(), 1) AS pct_within_100ms,
     max(query_duration_ms) AS max_ms,
     max(read_rows) AS max_read_rows
 FROM clusterAllReplicas(default, system.query_log)
 WHERE type = 'QueryFinish'
   AND is_initial_query = 1
   AND query NOT ILIKE '%system.query_log%'
-  AND (query ILIKE '%marts.v_concurrency%' OR query ILIKE '%marts.v_occupancy_minute%');
+  AND (query ILIKE '%marts.v_concurrency%' OR query ILIKE '%marts.v_occupancy%')
+GROUP BY query_shape
+ORDER BY queries DESC;
 ```
 
-Pooled on 2026-08-02 that reads `replicas_reporting = 2`, 1,469 queries, p50 34 ms, p95
-116 ms, p99 273 ms, max 771 ms, heaviest query 2,517,268 rows. Every one of those moves
-between runs, and the query count only ever climbs, so re-read it rather than quoting
-this line. Do not put it on a tile.
+Pooled on 2026-08-02 that reads `replicas_reporting = 2` on both rows. Single slice
+serve: 2,075 queries, p50 47 ms, p95 124 ms, p99 188 ms, 89.3 percent within 100 ms, max
+344 ms, heaviest query 871,362 rows. Multi slice batch: 69 queries, p50 144 ms, p95 1,811
+ms, p99 3,775 ms, 27.5 percent within 100 ms, max 3,775 ms, heaviest query 22,089,520
+rows. Every one of those moves between runs, and the query counts only ever climb, so
+re-read it rather than quoting this line. Do not put it on a tile.
 
 ## Step 2, build the dashboard
 
@@ -387,12 +472,12 @@ Add them top to bottom. The order is the argument.
 
 | # | Saved query | Chart | Axes | Width | What it says |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `overcount_headline` | Table | none | full | 3,743 against 2,692, 39 percent, three minutes apart |
+| 1 | `overcount_headline` | Table | none | full | 24,196 against 22,175 in the same minute, 9.1 percent on the peak and 90.1 on the average |
 | 2 | `naive_vs_foreground` | Line | x `ts`, y `foreground_concurrency` and `naive_concurrency` | full | the same claim drawn, minute by minute |
-| 3 | `concurrency_over_time` | Area | x `ts`, y `concurrency` | full | the answer on its own, one clean curve to 2,692 |
-| 4 | `peak_by_platform` | Bar Chart | x `platform`, y `peak_concurrency` | half, left | mobile carries the event |
-| 5 | `peak_by_video_type` | Table | none | half, right | live peaks 20 minutes before vod |
-| 6 | `serving_latency` | Table | none | full | p50 29 ms, and 2.5 million rows read in under a second |
+| 3 | `concurrency_over_time` | Area | x `ts`, y `concurrency` | full | the answer on its own, one curve to 22,175 |
+| 4 | `peak_by_platform` | Bar Chart | x `platform`, y `peak_concurrency` | half, left | phones and connected TVs carry the event |
+| 5 | `peak_by_video_type` | Table | none | half, right | vod peaks 45 minutes before live |
+| 6 | `serving_latency` | Table | none | full | 89 percent of serves within 100 ms, and 22 million rows read on the heaviest agent query |
 
 Tile 2 is the one that has to land. Drag both `foreground_concurrency` and
 `naive_concurrency` onto the y axis so the two series overlay on one pair of axes. If

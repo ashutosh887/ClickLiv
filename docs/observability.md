@@ -33,7 +33,10 @@ Each run emits one trace: a root span for the command, a span per pipeline stage
 per ingest, and a span per ClickHouse query. The query spans deliberately do not report
 client wall clock. Before export the tracer issues `SYSTEM FLUSH LOGS`, reads
 `system.query_log` for the query ids it collected, and attaches what the server itself
-recorded (D14):
+recorded (D14). The trace below is one real `make all` on the tuning extract, 905,558 raw
+events, read back out of ClickStack by `make obs`; it is kept as measured rather than
+rescaled, because the graded 7,000,000 event load has not been re-traced and no span
+timing here is going to be invented:
 
 ```
 stages
@@ -57,7 +60,7 @@ queries by rows read, server side
 
 Ingest spans carry `ingest.rows`, `ingest.bytes`, `ingest.duration_ms`, and
 `ingest.visible_lag_ms`, the delay between the insert being acknowledged and the rows
-being queryable. It is 3.3ms for 905,558 rows here, which is the honest answer for
+being queryable. It is 3.3ms for that run's 905,558 rows, which is the honest answer for
 synchronous MergeTree inserts and the panel that would move first on a live feeder.
 
 `make obs` reads that telemetry back out of the ClickHouse that ClickStack stores it in,
@@ -121,19 +124,23 @@ disengaging content. `make decline` builds detection deterministic: a
 minute-over-minute drop threshold read from `marts.v_occupancy_minute`, not an LLM
 call. The problem statement itself says AI is not required for the core, and this
 sits adjacent to the core, not inside it, so a threshold rule is the right scope for
-detection. One real event exists in the tuning data: 214 to 7 sessions, a 96.7% drop,
-found by the rule rather than manufactured. `evidence/decline_alerts.txt`.
+detection. The graded data holds exactly one event that clears the rule, as the tuning
+data did: minute 29758291, which is 2026-07-31 11:31 UTC, falls from 18,080 sessions to
+29, a 99.8% drop, found by the rule rather than manufactured.
+`evidence/decline_alerts.txt`.
 
 On top of that, one genuinely optional LLM call narrates *which* of the three named
 causes the pattern suggests, off unless a provider key is set, same no-op-by-default
-discipline as tracing. OpenAI `gpt-5.2` is preferred when `OPENAI_API_KEY` is set, and
-Bedrock `openai.gpt-oss-120b` is kept as the fallback rather than deleted; both speak
-the OpenAI Responses shape, so one reader parses either, and the evidence file names
-whichever produced the text it carries. Not Claude: Bedrock's Claude inference profiles
-are not reachable from this account in `ap-south-1` (checked directly, token quota is
-stuck at 0 and not self-service adjustable). Both working providers were verified with a
-real call on the 96.7% drop above, and each reasoned "asset ended" from the shape of the
-drop alone, which is what a human would conclude from the same number. The call is
-traced to Langfuse as a generation, carrying the model, the prompt, the completion and
-the token usage. No LLM sits anywhere in the correctness path: every number in
-`answers/`, `evidence/` and `submission/` is produced by SQL this repository ran.
+discipline as tracing. Google `gemini-3-flash-preview` is preferred when `GOOGLE_KEY` is
+set, with OpenAI `gpt-5.2` and Bedrock `openai.gpt-oss-120b` kept behind it as fallbacks
+rather than deleted; the two fallbacks speak the OpenAI Responses shape and share one
+reader, Google has its own, a dead provider falls through to the next, and the evidence
+file names whichever produced the text it carries. Only Google is live today. Not Claude:
+Bedrock's Claude inference profiles are not reachable from this account in `ap-south-1`
+(checked directly, token quota is stuck at 0 and not self-service adjustable). The live
+provider was verified with a real call on the 99.8% drop above and reasoned "asset ended"
+from the shape of the drop alone, which is what a human would conclude from the same
+number. The call is traced to Langfuse as a generation, carrying the model, the prompt,
+the completion and the token usage. No LLM sits anywhere in the correctness path: every
+number in `answers/`, `evidence/` and `submission/` is produced by SQL this repository
+ran.
