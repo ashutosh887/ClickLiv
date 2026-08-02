@@ -288,6 +288,7 @@ function readLabel() {
 
 function millis(seconds) {
   const ms = seconds * 1000;
+  if (ms < 0.05) return 'under 0.1 ms';
   return `${ms >= 10 ? fmt(Math.round(ms)) : ms.toFixed(1)} ms`;
 }
 
