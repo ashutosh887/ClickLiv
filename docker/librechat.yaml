@@ -27,8 +27,8 @@ modelSpecs:
         - 'What was the peak for Hindi audio?'
         - 'How does live compare to vod?'
       preset:
-        endpoint: openAI
-        model: 'gpt-5.2'
+        endpoint: google
+        model: 'gemini-3-flash-preview'
         greeting: 'Ask about foreground concurrency on the SonyLIV extract. The guardrailed marts tools are already attached.'
         promptPrefix: |
           You are the ClickLiv concurrency desk. You answer questions about
