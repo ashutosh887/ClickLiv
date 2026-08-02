@@ -111,10 +111,12 @@ class Tracer:
 
     def observe(self, sql: str, query_id: str, start_ns: int, end_ns: int,
                 error: str | None) -> None:
+        statement = redact(sql)[:400]
         record = self.open("clickhouse.query", {
             "db.system": "clickhouse",
             "db.query_id": query_id,
-            "db.statement": redact(sql)[:400],
+            "db.statement": statement,
+            "langfuse.observation.input": statement,
         }, kind=3, start_ns=start_ns)
         record["endTimeUnixNano"] = str(end_ns)
         if error:
@@ -128,17 +130,26 @@ class Tracer:
         ch.observer = None
         try:
             rows = ch.query_log_rows(f"query_id, {', '.join(SERVER_METRICS)}",
-                                     list(self.by_query))
+                                     list(self.by_query), retries=12, wait=2.5)
         except Exception as exc:
-            print(f"clickstack: query_log enrichment skipped, {exc}")
+            print(f"clickstack: WARNING query_log enrichment failed, "
+                  f"{len(self.by_query)} query spans ship without server metrics, {exc}")
             return
+        enriched = 0
         for row in rows:
             record = self.by_query.get(row["query_id"])
             if record is None:
                 continue
+            metrics = {name: int(row[name]) for name in SERVER_METRICS}
             record["attributes"] += [
-                attribute(f"clickhouse.{name}", int(row[name])) for name in SERVER_METRICS
+                attribute(f"clickhouse.{name}", value) for name, value in metrics.items()
             ]
+            note(record, **{"langfuse.observation.output": json.dumps(metrics)})
+            enriched += 1
+        missing = len(self.by_query) - enriched
+        if missing:
+            print(f"clickstack: WARNING {missing} of {len(self.by_query)} query spans "
+                  f"have no system.query_log row, their latency is client side")
 
     def export(self, ch) -> None:
         if not self.enabled or not self.spans:

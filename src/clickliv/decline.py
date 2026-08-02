@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 from . import llm
+from .answers import marts
 from .ch import ClickHouse
 
 DROP_THRESHOLD_PCT = 50.0
@@ -18,7 +19,7 @@ FROM
 (
     SELECT minute, concurrency AS s,
            lagInFrame(concurrency, 1) OVER (ORDER BY minute) AS prev_s
-    FROM marts.v_occupancy_minute(
+    FROM {marts}.v_occupancy_minute(
         country = '', platform = '', video_type = '', content_id = 0,
         minute_from = {minute_from}, minute_to = {minute_to})
 )
@@ -32,7 +33,7 @@ def run(ch: ClickHouse, evidence: Path) -> bool:
         "SELECT min(minute), max(minute) FROM minute_occupancy").rows[0]
     query_id = str(uuid.uuid4())
     rows = ch.query(QUERY.format(
-        minute_from=int(minute_from), minute_to=int(minute_to),
+        marts=marts(), minute_from=int(minute_from), minute_to=int(minute_to),
         min_base=MIN_BASE_CONCURRENCY, threshold=DROP_THRESHOLD_PCT),
         query_id=query_id).dicts()
 

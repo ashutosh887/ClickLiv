@@ -24,6 +24,7 @@ modelSpecs:
         - 'What has been the most busiest time?'
         - 'How much would we overcount by counting every open session instead of only foreground ones?'
         - 'Which platform peaked highest, and when?'
+        - 'What was the peak for Hindi audio?'
         - 'How does live compare to vod?'
       preset:
         endpoint: openAI
@@ -68,12 +69,20 @@ modelSpecs:
           concurrent sessions figure and say in one short sentence that it counts
           sessions rather than viewers.
 
-          category, app_version, player_version, audio_language and
-          subtitle_language are not parameters of the guardrailed tools. Answer
-          those on the clickhouse-official surface against
-          marts.v_concurrency_full, show the SQL, and label it an ad hoc query.
-          Language codes are three letters, so hindi is hin. Look any value up
-          in marts.v_dimension_values before you filter on it.
+          The guardrailed tools filter on all eight dimensions the marts views
+          hold: platform, country, video_type, category, app_version,
+          player_version, audio_language and subtitle_language, plus one title
+          or content_id. No dimension question needs the escape hatch. Language
+          codes are three letters, so hindi is hin, and list_dimensions names
+          every accepted value of every dimension in one call.
+
+          Values are case sensitive and two spellings that differ only in case
+          are separate slices, so hin and HIN are different values rather than
+          one. Report the value you actually filtered on.
+
+          When a title matches more than one content_id the tool lists the
+          candidates instead of guessing. Put that list to the user and ask
+          which one they meant; never pick one silently.
 
           If the question is about something this dataset does not hold, revenue
           or subscribers or anything outside foreground concurrency, say the
@@ -153,11 +162,17 @@ mcpServers:
       so and returns no number. Report that plainly. Never answer a question about
       one title with the figure for everything.
 
-      These tools filter on platform, country, video_type and title or content_id.
-      A question about category, app_version, player_version, audio_language or
-      subtitle_language needs marts.v_concurrency_full on the clickhouse-official
-      surface instead. Go and run it there and give the number, labelled as an ad
-      hoc query. Do not stop to ask the user for permission to switch surface.
+      These tools filter on all eight dimensions the marts views hold: platform,
+      country, video_type, category, app_version, player_version, audio_language
+      and subtitle_language, plus one title or content_id. A question about audio
+      language, subtitle language, category, app version or player version is a
+      concurrency_peak call with that argument, not a reason to switch surface.
+      Language codes are three letters, so hindi is hin, and list_dimensions names
+      every accepted value of all eight in a single call.
+
+      top_slices ranks the values of any one of those eight by their own peak, so
+      "which audio language peaked highest" and "which category is busiest" are
+      single calls too.
 
       Always tell the user that the answer came from the guardrailed ClickLiv
       marts surface, and name the tool you called.
@@ -238,11 +253,11 @@ mcpServers:
 
       All eight dimensions are filterable through marts.v_occupancy_full and
       marts.v_concurrency_full, which add category, app_version, player_version,
-      audio_language and subtitle_language to the four the shorter views take.
-      That is what this surface is for, so when the guardrailed tools cannot take
-      the filter, run the query here and answer, rather than telling the user the
-      question cannot be answered or asking whether to try. Say plainly that it was
-      an ad hoc query and show the SQL.
+      audio_language and subtitle_language to the four the shorter views take. The
+      guardrailed tools already take all eight, so a plain filter on any of them
+      belongs there and not here. Come to this surface for the shapes those tools
+      cannot express, schema exploration or an ad hoc aggregate with no mart behind
+      it, and when you do, say plainly that it was an ad hoc query and show the SQL.
 
       Whenever you answer from here, say so plainly and show the SQL you ran, so
       the reader can tell an ad hoc query apart from a published mart.

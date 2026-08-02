@@ -6,6 +6,7 @@ import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from .answers import marts
 from .ch import ClickHouse
 
 GRAIN_MINUTES = 60
@@ -14,7 +15,7 @@ PLATFORMS_SQL = "SELECT DISTINCT platform FROM minute_occupancy ORDER BY platfor
 
 CONCURRENCY_SQL = """
 SELECT bucket_minute, peak_concurrency, average_concurrency, minutes_in_bucket
-FROM marts.v_concurrency(
+FROM {marts}.v_concurrency(
     grain_minutes = {grain:UInt32}, country = '', platform = {platform:String},
     video_type = '', content_id = 0, minute_from = 0, minute_to = 4294967295)
 """
@@ -288,7 +289,8 @@ loadPlatforms().then(refresh);
 
 
 def concurrency_rows(ch: ClickHouse, platform: str, grain: int) -> list[dict]:
-    result = ch.query(CONCURRENCY_SQL, settings={"param_grain": grain, "param_platform": platform})
+    result = ch.query(CONCURRENCY_SQL.replace("{marts}", marts()),
+                      settings={"param_grain": grain, "param_platform": platform})
     return result.dicts()
 
 

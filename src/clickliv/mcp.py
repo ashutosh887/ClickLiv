@@ -1,4 +1,4 @@
-"""MCP over Streamable HTTP. Four pre-vetted tools, curated marts views only, and a
+"""MCP over Streamable HTTP. Five pre-vetted tools, curated marts views only, and a
 server-side query budget: the model never sends SQL.
 """
 
@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -24,30 +25,45 @@ AGENT_USER = "marts_agent"
 MINUTE_MIN = 0
 MINUTE_MAX = 4294967295
 ROW_CAP = 40
+SLICE_CAP = 40
 
 GRAINS = {"minute": 1, "hour": 60, "day": 1440}
 DEFAULT_GRAIN = "minute"
 
 NO_FILTER = frozenset({"", "all", "any", "none", "null", "*", "%"})
 
-DIMENSION_NAMES = ("country", "platform", "video_type")
-DIMENSION_TTL = 300
+DIMENSION_TTL = 60
 NAMED_VALUES = 20
 
-FILTER_ARGS = (
-    "country = {country:String}, platform = {platform:String}, "
-    "video_type = {video_type:String}, content_id = {content_id:UInt64}, "
-    "minute_from = {minute_from:UInt32}, minute_to = {minute_to:UInt32}"
-)
+SOURCE_VIEWS = ("v_occupancy_full", "v_concurrency_full")
+STRING_PARAM = re.compile(r"\{(\w+):String\}")
 
-PEAK_SQL = (
-    "SELECT bucket_minute, peak_concurrency, average_concurrency, minutes_in_bucket "
-    f"FROM marts.v_concurrency(grain_minutes = {{grain_minutes:UInt32}}, {FILTER_ARGS})"
-)
+SCHEMA_SQL = ("SELECT name, create_table_query FROM system.tables "
+              f"WHERE database = 'marts' AND name IN {SOURCE_VIEWS}")
 
-SERIES_SQL = f"SELECT minute, concurrency FROM marts.v_occupancy_minute({FILTER_ARGS})"
+NAMES_SQL = "SELECT DISTINCT dimension FROM marts.v_dimension_values ORDER BY dimension"
 
-WINDOW_SQL = ("SELECT min_minute, max_minute, minutes_with_sessions, span_days "
+DIMENSION_SQL = ("SELECT dimension, value FROM marts.v_dimension_values WHERE value != '' "
+                 "ORDER BY dimension, minutes_present DESC, value")
+
+
+def filter_args(names: tuple[str, ...]) -> str:
+    return (", ".join(f"{name} = {{{name}:String}}" for name in names) +
+            ", content_id = {content_id:UInt64}, "
+            "minute_from = {minute_from:UInt32}, minute_to = {minute_to:UInt32}")
+
+
+def peak_sql(names: tuple[str, ...]) -> str:
+    return ("SELECT bucket_minute, peak_concurrency, average_concurrency, minutes_in_bucket "
+            "FROM marts.v_concurrency_full(grain_minutes = {grain_minutes:UInt32}, "
+            f"{filter_args(names)})")
+
+
+def series_sql(names: tuple[str, ...]) -> str:
+    return f"SELECT minute, concurrency FROM marts.v_occupancy_full({filter_args(names)})"
+
+
+WINDOW_SQL =("SELECT min_minute, max_minute, minutes_with_sessions, span_days "
               "FROM marts.v_data_window")
 
 OVERCOUNT_SQL = ("SELECT foreground_peak, foreground_peak_utc, naive_peak, naive_peak_utc, "
@@ -56,10 +72,6 @@ OVERCOUNT_SQL = ("SELECT foreground_peak, foreground_peak_utc, naive_peak, naive
 
 UNIT_NOTE = ("concurrency counts video sessions that were in the foreground at the same "
              "moment, not distinct people or accounts")
-
-DIMENSION_SQL = ("SELECT dimension, value FROM marts.v_dimension_values WHERE dimension IN "
-                 f"({', '.join(repr(name) for name in DIMENSION_NAMES)}) AND value != '' "
-                 "ORDER BY dimension, minutes_present DESC, value")
 
 TITLE_SQL = ("SELECT content_id, title, minutes_present FROM marts.v_titles "
              "WHERE title != '' AND positionCaseInsensitive(title, {needle:String}) > 0 "
@@ -76,17 +88,52 @@ CACHE_READ = 0.0
 CACHE_LOCK = threading.Lock()
 
 
-def dimensions(agent: ClickHouse, refresh: bool = False) -> dict[str, tuple[str, ...]]:
-    """The accepted values come out of the data, so a replacement dataset needs no code change."""
+def discover(agent: ClickHouse) -> tuple[str, ...]:
+    """The filter dimensions are the String parameters both marts views declare, so a view
+    that gains a dimension gains a filter with no code change, and a half applied schema
+    narrows the surface rather than breaking every query on it."""
+    try:
+        declared = {str(view): tuple(dict.fromkeys(STRING_PARAM.findall(str(sql))))
+                    for view, sql in agent.query(SCHEMA_SQL).rows}
+        if len(declared) == len(SOURCE_VIEWS):
+            occupancy, concurrency = (declared[view] for view in SOURCE_VIEWS)
+            names = tuple(name for name in occupancy if name in concurrency)
+            if names:
+                return names
+    except (ClickHouseError, OSError):
+        pass
+    return tuple(str(row[0]) for row in agent.query(NAMES_SQL).rows)
+
+
+def load_dimensions(agent: ClickHouse):
+    """Both the dimension names and their values come out of the database, so a replacement
+    dataset needs no code change."""
     global CACHE, CACHE_READ
+    names = discover(agent)
+    result = agent.query(DIMENSION_SQL)
+    found: dict[str, list[str]] = {name: [] for name in names}
+    for name, value in result.rows:
+        if str(name) in found:
+            found[str(name)].append(str(value))
+    fresh = {name: tuple(values) for name, values in found.items()}
     with CACHE_LOCK:
-        if refresh or not CACHE or time.monotonic() - CACHE_READ > DIMENSION_TTL:
-            found: dict[str, list[str]] = {name: [] for name in DIMENSION_NAMES}
-            for name, value in agent.query(DIMENSION_SQL).rows:
-                found.setdefault(str(name), []).append(str(value))
-            CACHE = {name: tuple(values) for name, values in found.items()}
+        if any(fresh.values()) or not CACHE:
+            CACHE = fresh
             CACHE_READ = time.monotonic()
-        return CACHE
+        return CACHE, result
+
+
+def dimensions(agent: ClickHouse, refresh: bool = False) -> dict[str, tuple[str, ...]]:
+    """Held for a minute at most, so a marts rebuild underneath the server is picked up
+    without a restart."""
+    with CACHE_LOCK:
+        if CACHE and not refresh and time.monotonic() - CACHE_READ <= DIMENSION_TTL:
+            return CACHE
+    return load_dimensions(agent)[0]
+
+
+def names_of(agent: ClickHouse) -> tuple[str, ...]:
+    return tuple(dimensions(agent))
 
 
 def named_values(values: tuple[str, ...]) -> str:
@@ -191,22 +238,25 @@ def content_id_argument(agent: ClickHouse, arguments: dict) -> int:
 
 
 def filter_settings(agent: ClickHouse, arguments: dict, content_id: int) -> dict:
-    return {
-        "param_country": enum_argument(agent, arguments, "country"),
-        "param_platform": enum_argument(agent, arguments, "platform"),
-        "param_video_type": enum_argument(agent, arguments, "video_type"),
-        "param_content_id": content_id,
-    }
+    settings = {f"param_{name}": enum_argument(agent, arguments, name)
+                for name in names_of(agent)}
+    settings["param_content_id"] = content_id
+    return settings
 
 
-def filter_label(settings: dict, arguments: dict, content_id: int) -> str:
+def filter_label(settings: dict, arguments: dict, content_id: int,
+                 names: tuple[str, ...]) -> str:
     """Reports the canonical values, so a sentinel reads as no filter rather than as a value."""
     parts = [f"{name}={settings['param_' + name]}"
-             for name in ("platform", "country", "video_type") if settings["param_" + name]]
+             for name in names if settings["param_" + name]]
     if arguments.get("title"):
         parts.append(f"title={arguments['title']} (content_id {content_id})")
     elif content_id:
         parts.append(f"content_id={content_id}")
+    low = int(settings.get("param_minute_from", MINUTE_MIN))
+    high = int(settings.get("param_minute_to", MINUTE_MAX))
+    if low != MINUTE_MIN or high != MINUTE_MAX:
+        parts.append(f"minutes {low} to {high}, which is {stamp(low)} to {stamp(high)}")
     return ", ".join(parts) or "none"
 
 
@@ -216,32 +266,38 @@ def stamp(minute: int | None) -> str:
     return datetime.fromtimestamp(int(minute) * 60, UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def empty_note(agent: ClickHouse, label: str) -> list[str]:
+def empty_note(agent: ClickHouse, label: str, requested: tuple[int, int]) -> list[str]:
     """An empty match is never an answer, so say what does exist instead of returning a zero."""
     low, high, minutes, _ = agent.query(WINDOW_SQL).rows[0]
-    return [
+    note = [
         f"nothing matched, so there is no number to report and zero is not the answer; "
         f"the filters asked for were {label}",
         f"the dataset is a fixed historical extract covering {stamp(low)} to {stamp(high)}, "
         f"epoch minutes {low} to {high}, {int(minutes):,} of which carry sessions, and "
         f"nothing outside that window exists",
-        "call list_dimensions for every filter value this surface accepts, and tell the "
-        "user which part of the question the data does not cover",
     ]
+    if requested[0] > int(high) or requested[1] < int(low):
+        note.append(f"the window asked for, {stamp(requested[0])} to {stamp(requested[1])}, "
+                    f"lies entirely outside the data, so this is a question about a time the "
+                    f"extract does not cover rather than a quiet period; say so, name the "
+                    f"window above, and offer to answer over it instead of reporting zero")
+    note.append("call list_dimensions for every filter value this surface accepts, and tell "
+                "the user which part of the question the data does not cover")
+    return note
 
 
-def slice_branch(index: int, dimension: str) -> str:
-    filters = {name: "{blank:String}" for name in DIMENSION_NAMES}
+def slice_branch(index: int, dimension: str, names: tuple[str, ...]) -> str:
+    filters = {name: "{blank:String}" for name in names}
     filters[dimension] = f"{{value{index}:String}}"
+    args = ", ".join(f"{name} = {filters[name]}" for name in names)
     return (f"SELECT {{dimension{index}:String}} AS dimension, {{value{index}:String}} AS value, "
             "max(concurrency) AS peak_concurrency, argMax(minute, concurrency) AS peak_minute, "
-            "count() AS minutes_present FROM marts.v_occupancy_minute("
-            f"country = {filters['country']}, platform = {filters['platform']}, "
-            f"video_type = {filters['video_type']}, content_id = {{zero:UInt64}}, "
+            f"count() AS minutes_present FROM marts.v_occupancy_full({args}, "
+            "content_id = {zero:UInt64}, "
             "minute_from = {minute_from:UInt32}, minute_to = {minute_to:UInt32})")
 
 
-def slice_query(pairs: list[tuple[str, str]]) -> tuple[str, dict]:
+def slice_query(pairs: list[tuple[str, str]], names: tuple[str, ...]) -> tuple[str, dict]:
     """One UNION ALL over the view, one branch per candidate value, so the sum happens before the max."""
     settings = {"param_blank": "", "param_zero": 0,
                 "param_minute_from": MINUTE_MIN, "param_minute_to": MINUTE_MAX}
@@ -249,7 +305,7 @@ def slice_query(pairs: list[tuple[str, str]]) -> tuple[str, dict]:
     for index, (dimension, value) in enumerate(pairs):
         settings[f"param_dimension{index}"] = dimension
         settings[f"param_value{index}"] = value
-        branches.append(slice_branch(index, dimension))
+        branches.append(slice_branch(index, dimension, names))
     sql = ("SELECT * FROM (" + " UNION ALL ".join(branches) +
            ") ORDER BY peak_concurrency DESC, value")
     return sql, settings
@@ -261,8 +317,9 @@ def render_table(columns: list[str], rows: list[tuple], cap: int = ROW_CAP) -> s
     shown = [tuple(str(value) for value in row) for row in rows[:cap]]
     widths = [max([len(columns[i])] + [len(row[i]) for row in shown])
               for i in range(len(columns))]
-    lines = ["  ".join(name.ljust(widths[i]) for i, name in enumerate(columns))]
-    lines += ["  ".join(value.ljust(widths[i]) for i, value in enumerate(row)) for row in shown]
+    lines = ["  ".join(name.ljust(widths[i]) for i, name in enumerate(columns)).rstrip()]
+    lines += ["  ".join(value.ljust(widths[i]) for i, value in enumerate(row)).rstrip()
+              for row in shown]
     if len(rows) > cap:
         lines.append(f"{len(rows) - cap} further rows not shown")
     return "\n".join(lines)
@@ -286,10 +343,11 @@ def downsample(rows: list[tuple], cap: int) -> tuple[list[tuple], int]:
 
 
 def tool_concurrency_peak(agent: ClickHouse, arguments: dict):
-    """Peak and average concurrency per bucket from marts.v_concurrency.
+    """Peak and average concurrency per bucket from marts.v_concurrency_full.
     No arguments means the whole dataset at minute grain, which is the busiest moment."""
-    reject_unknown(arguments, ("grain", "platform", "country", "video_type", "content_id",
-                               "title", "minute_from", "minute_to"))
+    names = names_of(agent)
+    reject_unknown(arguments, ("grain", "content_id", "title", "minute_from", "minute_to",
+                               *names))
     grain = arguments.get("grain") or DEFAULT_GRAIN
     if grain not in GRAINS:
         raise ToolError(f"grain must be one of {', '.join(GRAINS)}, got {grain!r}")
@@ -301,14 +359,14 @@ def tool_concurrency_peak(agent: ClickHouse, arguments: dict):
     settings = {**filter_settings(agent, arguments, content_id),
                 "param_grain_minutes": GRAINS[grain],
                 "param_minute_from": minute_from, "param_minute_to": minute_to}
-    label = filter_label(settings, arguments, content_id)
-    result = agent.query(PEAK_SQL, settings=settings)
+    label = filter_label(settings, arguments, content_id, names)
+    result = agent.query(peak_sql(names), settings=settings)
     peak = max((row[1] for row in result.rows), default=0)
     peak_bucket = next((row[0] for row in result.rows if row[1] == peak), None)
     weighted = sum(float(row[2]) * int(row[3]) for row in result.rows)
     minutes = sum(int(row[3]) for row in result.rows)
     if not minutes:
-        return answer(empty_note(agent, label), [], [], result), result
+        return answer(empty_note(agent, label, (minute_from, minute_to)), [], [], result), result
     summary = [f"peak concurrency {peak} in the {grain} bucket starting {stamp(peak_bucket)}",
                f"average concurrency {weighted / minutes:.1f} over {minutes:,} active minutes",
                UNIT_NOTE, f"filters: {label}"]
@@ -321,10 +379,10 @@ def tool_concurrency_peak(agent: ClickHouse, arguments: dict):
 
 
 def tool_concurrency_series(agent: ClickHouse, arguments: dict):
-    """Per minute concurrency from marts.v_occupancy_minute, bound as query parameters.
+    """Per minute concurrency from marts.v_occupancy_full, bound as query parameters.
     Downsampled to stay readable in a chat, keeping the peak of each window."""
-    reject_unknown(arguments, ("platform", "country", "video_type", "content_id",
-                               "title", "minute_from", "minute_to"))
+    names = names_of(agent)
+    reject_unknown(arguments, ("content_id", "title", "minute_from", "minute_to", *names))
     minute_from = integer_argument(arguments, "minute_from", MINUTE_MIN, MINUTE_MIN, MINUTE_MAX)
     minute_to = integer_argument(arguments, "minute_to", MINUTE_MAX, MINUTE_MIN, MINUTE_MAX)
     if minute_from > minute_to:
@@ -332,10 +390,10 @@ def tool_concurrency_series(agent: ClickHouse, arguments: dict):
     content_id = content_id_argument(agent, arguments)
     settings = {**filter_settings(agent, arguments, content_id),
                 "param_minute_from": minute_from, "param_minute_to": minute_to}
-    label = filter_label(settings, arguments, content_id)
-    result = agent.query(SERIES_SQL, settings=settings)
+    label = filter_label(settings, arguments, content_id, names)
+    result = agent.query(series_sql(names), settings=settings)
     if not result.rows:
-        return answer(empty_note(agent, label), [], [], result), result
+        return answer(empty_note(agent, label, (minute_from, minute_to)), [], [], result), result
     peak = max(row[1] for row in result.rows)
     peak_minute = next(row[0] for row in result.rows if row[1] == peak)
     points, stride = downsample(result.rows, ROW_CAP)
@@ -354,18 +412,26 @@ def tool_top_slices(agent: ClickHouse, arguments: dict):
     The sum across the unfiltered dimensions happens before the maximum, never after."""
     reject_unknown(arguments, ("dimension",))
     dimension = arguments.get("dimension")
-    if dimension not in DIMENSION_NAMES:
-        raise ToolError(f"dimension must be one of {', '.join(DIMENSION_NAMES)}, "
+    known_dimensions = dimensions(agent)
+    if dimension not in known_dimensions:
+        raise ToolError(f"dimension must be one of {', '.join(known_dimensions)}, "
                         f"got {dimension!r}")
-    known = dimensions(agent)[dimension]
-    sql, settings = slice_query([(dimension, value) for value in known])
+    names = tuple(known_dimensions)
+    known = known_dimensions[dimension]
+    candidates = known[:SLICE_CAP]
+    sql, settings = slice_query([(dimension, value) for value in candidates], names)
     result = agent.query(sql, settings=settings)
     present = [row for row in result.rows if int(row[4]) > 0]
     summary = [
         f"{dimension} values ranked by peak concurrency, each summed across the other "
         f"dimensions before the maximum is taken",
-        f"{len(present)} of {len(known)} values carry sessions",
+        f"{len(present)} of {len(candidates)} values carry sessions",
     ]
+    if len(known) > len(candidates):
+        summary.append(f"{dimension} takes {len(known)} values and this ranks the "
+                       f"{len(candidates)} present in the most minutes, so the long tail is "
+                       "not ranked here; list_dimensions names every one of them and "
+                       "concurrency_peak takes any single value as a filter")
     rows = [(row[1], row[2], row[3], stamp(row[3]), row[4]) for row in present]
     columns = [dimension, "peak", "peak_minute", "peak_minute_start", "minutes_present"]
     return answer(summary, columns, rows, result), result
@@ -395,12 +461,9 @@ def tool_overcount(agent: ClickHouse, arguments: dict):
 
 
 def tool_list_dimensions(agent: ClickHouse, arguments: dict):
-    """The filter values this server accepts, each checked against the data in one query."""
+    """Every filter value this server accepts, read straight from the data in one query."""
     reject_unknown(arguments, ())
-    known = dimensions(agent, refresh=True)
-    pairs = [(dimension, value) for dimension, values in known.items() for value in values]
-    sql, settings = slice_query(pairs)
-    result = agent.query(sql, settings=settings)
+    known, result = load_dimensions(agent)
     low, high, minutes, days = agent.query(WINDOW_SQL).rows[0]
     summary = [
         "these are the only filter values this server accepts; anything else is rejected "
@@ -409,11 +472,39 @@ def tool_list_dimensions(agent: ClickHouse, arguments: dict):
         f"{float(days):.1f} days, so do not assume the present is inside it",
         f"epoch minutes {low} to {high}, {int(minutes):,} minutes carry sessions",
         f"grain values for concurrency_peak: {', '.join(GRAINS)}, default {DEFAULT_GRAIN}",
+        "values are listed busiest first inside each dimension, and every one of them is a "
+        "filter concurrency_peak and concurrency_series accept; call top_slices with a "
+        "dimension to rank its values by peak concurrency",
+        "values are case sensitive and near duplicates that differ only in case are separate "
+        "slices, so hin and HIN are two different values, not one",
     ]
-    rows = [(row[0], row[1], row[2], row[4]) for row in
-            sorted(result.rows, key=lambda row: (row[0], -int(row[2])))]
-    columns = ["dimension", "value", "peak", "minutes_present"]
+    summary.insert(1, f"this dataset carries {len(known)} filter dimensions, "
+                      f"{', '.join(known)}, and every one of them is an argument of "
+                      "concurrency_peak and concurrency_series")
+    rows = [(name, len(values), ", ".join(values) or "no values in this dataset")
+            for name, values in known.items()]
+    columns = ["dimension", "values", "accepted_values"]
     return answer(summary, columns, rows, result), result
+
+
+DIMENSION_HINTS = {
+    "video_type": "Leave it out for both live and vod.",
+    "audio_language": "Codes are three letters, so Hindi is hin and Tamil is tam.",
+    "subtitle_language": "Codes are three letters, and off means subtitles were off.",
+}
+
+
+def dimension_properties(names: tuple[str, ...]) -> dict:
+    """One filter argument per dimension the marts view declares, so a dimension the pipeline
+    adds becomes a filter without an edit here."""
+    return {
+        name: {"type": "string",
+               "description": f"Optional {name.replace('_', ' ')} filter, case sensitive. "
+                              f"Leave it out for every {name.replace('_', ' ')}. "
+                              + DIMENSION_HINTS.get(name, "list_dimensions names every "
+                                                          "accepted value.")}
+        for name in names
+    }
 
 
 TOOLS = [
@@ -423,9 +514,12 @@ TOOLS = [
                        "Call it with no arguments at all for the busiest moment in the whole "
                        "dataset, which is what a question like what was the busiest time is "
                        "asking for: grain defaults to minute and the window defaults to every "
-                       "minute the dataset holds, so no time range is ever needed. Add a "
-                       "filter only to narrow the question, and leave a filter out to mean no "
-                       "filter on that dimension. Reads marts.v_concurrency.",
+                       "minute the dataset holds, so no time range is ever needed. It filters "
+                       "on every dimension the marts views carry, plus a single title or "
+                       "content_id. Add a filter only to narrow the question, and leave a "
+                       "filter out to mean no filter on that dimension. Reads "
+                       "marts.v_concurrency_full.",
+        "dimensions": True,
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -434,15 +528,6 @@ TOOLS = [
                                          "is the right grain for the busiest moment. Use hour "
                                          "or day only when the question asks for the busiest "
                                          "hour or the busiest day."},
-                "platform": {"type": "string",
-                             "description": "Optional platform filter, case sensitive. Leave "
-                                            "it out for every platform."},
-                "country": {"type": "string",
-                            "description": "Optional country filter, case sensitive. Leave it "
-                                           "out for every country."},
-                "video_type": {"type": "string",
-                               "description": "Optional video type filter, case sensitive. "
-                                              "Leave it out for both live and vod."},
                 "content_id": {"type": "integer", "minimum": 0,
                                "description": "Optional content id filter. Leave it out, or "
                                               "pass 0, for every title."},
@@ -475,20 +560,13 @@ TOOLS = [
                        "whole dataset, downsampled so each point keeps the peak of its window. "
                        "minute_from and minute_to are epoch minutes, not dates, and both "
                        "default to the full window; call list_dimensions for the range the "
-                       "dataset covers. For a single peak number prefer concurrency_peak. "
-                       "Reads marts.v_occupancy_minute.",
+                       "dataset covers. Takes the same dimension filters as concurrency_peak. "
+                       "For a single peak number prefer concurrency_peak. Reads "
+                       "marts.v_occupancy_full.",
+        "dimensions": True,
         "inputSchema": {
             "type": "object",
             "properties": {
-                "platform": {"type": "string",
-                             "description": "Optional platform filter, case sensitive. Leave "
-                                            "it out for every platform."},
-                "country": {"type": "string",
-                            "description": "Optional country filter, case sensitive. Leave it "
-                                           "out for every country."},
-                "video_type": {"type": "string",
-                               "description": "Optional video type filter, case sensitive. "
-                                              "Leave it out for both live and vod."},
                 "content_id": {"type": "integer", "minimum": 0,
                                "description": "Optional content id filter. Leave it out, or "
                                               "pass 0, for every title."},
@@ -515,13 +593,16 @@ TOOLS = [
         "name": "top_slices",
         "description": "Every value of one dimension ranked by its own peak concurrency, with "
                        "the minute it peaked, so crossovers between slices are visible. Use it "
-                       "for the busiest platform, country or video type. Each value is summed "
-                       "across the other dimensions before its maximum is taken, so the "
-                       "figures are comparable and do not add up to the overall peak.",
+                       "for the busiest value of any dimension the dataset carries. Each value "
+                       "is summed across the other dimensions before its maximum is taken, so "
+                       "the figures are comparable and do not add up to the overall peak. A "
+                       f"dimension with more than {SLICE_CAP} values is ranked over the "
+                       f"{SLICE_CAP} present in the most minutes, and the answer says so.",
+        "ranks": True,
         "inputSchema": {
             "type": "object",
             "properties": {
-                "dimension": {"type": "string", "enum": list(DIMENSION_NAMES),
+                "dimension": {"type": "string",
                               "description": "Dimension whose values are ranked."},
             },
             "required": ["dimension"],
@@ -543,11 +624,11 @@ TOOLS = [
     },
     {
         "name": "list_dimensions",
-        "description": "The accepted platform, country and video type values, and the time "
-                       "window the dataset actually covers as both epoch minutes and UTC "
-                       "timestamps. The data is a fixed historical extract, not a live feed, "
-                       "so call this before filtering or before naming any date, and never "
-                       "assume the present is inside the window.",
+        "description": "Every filter dimension this dataset carries, every accepted value of "
+                       "each, and the time window the data actually covers as both epoch "
+                       "minutes and UTC timestamps. The data is a fixed historical extract, "
+                       "not a live feed, so call this before filtering or before naming any "
+                       "date, and never assume the present is inside the window.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
         "run": tool_list_dimensions,
     },
@@ -555,18 +636,28 @@ TOOLS = [
 
 
 def listing(agent: ClickHouse) -> list[dict]:
-    """The dimension enums are filled from the data at list time, never from a baked in list."""
+    """Both the filter arguments and their accepted values are filled from the data at list
+    time, so a dataset with new dimensions publishes new filters on its own."""
     try:
         known = dimensions(agent)
     except (ClickHouseError, OSError):
         known = {}
+    names = tuple(known)
+    named = ", ".join(names)
     tools = []
     for tool in TOOLS:
         schema = json.loads(json.dumps(tool["inputSchema"]))
-        for name, values in known.items():
-            if values and name in schema["properties"]:
-                schema["properties"][name]["enum"] = list(values)
-        tools.append({"name": tool["name"], "description": tool["description"],
+        description = tool["description"]
+        if tool.get("dimensions"):
+            schema["properties"] = {**dimension_properties(names), **schema["properties"]}
+            for name, values in known.items():
+                if values:
+                    schema["properties"][name]["enum"] = list(values)
+        if tool.get("ranks") and names:
+            schema["properties"]["dimension"]["enum"] = list(names)
+        if named and (tool.get("dimensions") or tool.get("ranks")):
+            description += f" The dimensions in this dataset are {named}."
+        tools.append({"name": tool["name"], "description": description,
                       "inputSchema": schema})
     return tools
 

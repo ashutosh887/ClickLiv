@@ -6,6 +6,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+from .answers import marts
 from .ch import ClickHouse
 
 SLICES = [
@@ -33,7 +34,7 @@ def peak_for_slice(ch: ClickHouse, spec: dict, minute_from: int, minute_to: int)
     args = CALL_ARGS.format(**spec, minute_from=minute_from, minute_to=minute_to)
     peak_minute, peak = ch.query(
         f"SELECT argMax(bucket_minute, peak_concurrency), max(peak_concurrency) "
-        f"FROM marts.v_concurrency({args})", query_id=query_id).rows[0]
+        f"FROM {marts()}.v_concurrency({args})", query_id=query_id).rows[0]
     return {"label": spec["label"], "query_id": query_id,
             "peak_minute": int(peak_minute), "peak": int(peak)}
 
