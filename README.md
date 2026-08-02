@@ -12,6 +12,7 @@ ClickHouse.
 ## Team Members
 
 - Ashutosh Jha ([@ashutosh887](https://github.com/ashutosh887))
+- Mansi Sondhi ([@weirdcoder26](https://github.com/weirdcoder26))
 
 ## What it does
 
