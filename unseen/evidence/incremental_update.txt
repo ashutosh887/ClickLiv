@@ -1,0 +1,10 @@
+-- update handling: an open session absorbs a new heartbeat live
+session 000262BB321168C6B67FAE00D5EE01C62D92A1F7444E132B7DE930BEC26B6E92
+before: segment_start_ms=1785496861476 last_active_ms=1785497113738
+inserted one new heartbeat at t=1785497143738 (last_active_ms + 30000ms, inside the 90000ms gap threshold)
+
+mv_extend_open_session fired with no rebuild: open_session_state.last_active_ms is now 1785497143738 (matches the new event time)
+
+full batch resessionize (ground truth): active_intervals' last segment for this session now ends at 1785497183738
+incremental prediction was 1785497183738 (new event + 40000ms grace)
+PASS: incremental and batch agree exactly

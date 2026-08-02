@@ -1,0 +1,9 @@
+query_label,grain_minutes,country,platform,video_type,content_id,minute_from,minute_to,peak_concurrency,average_concurrency,average_denominator,active_minutes
+day_peak_no_filter,1440,,,,0,23667511,29762606,22175,313.4852,active minutes (minute_occupancy has no zero rows),4145
+hour_peak_no_filter,60,,,,0,23667511,29762606,22175,313.4852,active minutes (minute_occupancy has no zero rows),4145
+minute_peak_no_filter,1,,,,0,23667511,29762606,22175,313.4852,active minutes (minute_occupancy has no zero rows),4145
+day_peak_platform_android_phone,1440,,ANDROID_PHONE,,0,23667511,29762606,6513,110.4927,active minutes (minute_occupancy has no zero rows),3286
+day_peak_platform_sony_android_tv,1440,,SONY_ANDROID_TV,,0,23667511,29762606,3308,467.6798,active minutes (minute_occupancy has no zero rows),406
+day_peak_video_type_live,1440,,,live,0,23667511,29762606,10314,797.3458,active minutes (minute_occupancy has no zero rows),668
+day_peak_iphone_india,1440,india,IPHONE,,0,23667511,29762606,715,49.2516,active minutes (minute_occupancy has no zero rows),771
+day_peak_vod_mweb,1440,,Mweb,vod,0,23667511,29762606,75,45.15,active minutes (minute_occupancy has no zero rows),80

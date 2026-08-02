@@ -1,0 +1,35 @@
+-- EXPLAIN indexes = 1
+Expression ((Project names + (Projection + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Materialize constants after VIEW subquery + (Project names + (Projection + (Change column names to column identifiers + Project names)))))))))
+  Sorting (Sorting for ORDER BY)
+    Expression ((Before ORDER BY + Projection))
+      Aggregating
+        Expression ((Before GROUP BY + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Materialize constants after VIEW subquery + (Project names + (Projection + (Change column names to column identifiers + (Project names + (Projection + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Materialize constants after VIEW subquery + (Project names + (Projection + (Change column names to column identifiers + (Proje)
+          Aggregating
+            Expression (Before GROUP BY)
+              Filter ((WHERE + Change column names to column identifiers))
+                ReadFromMergeTree (clickliv.minute_occupancy)
+                Indexes:
+                  Partition Min-Max
+                    Keys:
+                      minute
+                    Condition: and((minute in (-Inf, 29762606]), (minute in [23667511, +Inf)))
+                    Parts: 96/96
+                    Granules: 180/180
+                  Partition
+                    Condition: true
+                    Parts: 96/96
+                    Granules: 180/180
+                  PrimaryKey
+                    Keys:
+                      minute
+                    Condition: and((minute in (-Inf, 29762606]), (minute in [23667511, +Inf)))
+                    Parts: 96/96
+                    Granules: 180/180
+                    Search Algorithm: binary search
+                  Ranges: 96
+
+-- EXPLAIN ANALYZE unavailable on this server (runnable EXPLAIN ANALYZE needs ClickHouse 26.7+): 400 on query 295e0114-27b5-4c55-9b86-7bcd72529fd8
+Code: 62. DB::Exception: Syntax error: failed at position 17 (SELECT) (line 1, col 17): SELECT * FROM marts.v_concurrency(grain_minutes = 1440, country = '', platform = '', video_type = '', content_id = 0, minute_from = 23667511, minute_to = 297626... Expected one of: token sequence, Dot, token, Equals. (SYNTAX_ERROR) (version 26.4.1.2029 (official build))
+---
+EXPLAIN ANALYZE SELECT * FROM marts.v_concurrency(grain_minutes = 1440, country = '', platform = '', video_type = '', content_id = 0, minute_from = 23667511, minute_to = 29762606)
+FORMAT JSONCompact

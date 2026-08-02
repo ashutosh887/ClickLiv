@@ -1,0 +1,59 @@
+-- query: SELECT sum(sessions) FROM minute_occupancy WHERE content_id = 2078157818
+-- content_id 2078157818 chosen as the busiest, 44532 rows
+
+-- before, optimize_use_projections = 0, reads the base table
+Expression ((Project names + Projection))
+  Aggregating
+    Expression (Before GROUP BY)
+      Expression ((WHERE + Change column names to column identifiers))
+        ReadFromMergeTree (clickliv.minute_occupancy)
+        Indexes:
+          Partition Min-Max
+            Condition: true
+            Parts: 96/96
+            Granules: 180/180
+          Partition
+            Condition: true
+            Parts: 96/96
+            Granules: 180/180
+          PrimaryKey
+            Keys:
+              content_id
+            Condition: (content_id in [2078157818, 2078157818])
+            Parts: 52/96
+            Granules: 136/180
+            Search Algorithm: generic exclusion search
+          Ranges: 52
+
+-- after, default settings, the planner picks proj_content_minute on its own
+Expression ((Project names + Projection))
+  Aggregating
+    Expression
+      ReadFromMergeTree (proj_content_minute)
+      Indexes:
+        PrimaryKey
+          Keys:
+            content_id
+          Condition: (content_id in [2078157818, 2078157818])
+          Parts: 21/52
+          Granules: 26/136
+          Search Algorithm: binary search
+        Ranges: 21
+
+-- forced, force_optimize_projection_name = 'proj_content_minute'
+Expression ((Project names + Projection))
+  Aggregating
+    Expression
+      ReadFromMergeTree (proj_content_minute)
+      Indexes:
+        PrimaryKey
+          Keys:
+            content_id
+          Condition: (content_id in [2078157818, 2078157818])
+          Parts: 21/52
+          Granules: 26/136
+          Search Algorithm: binary search
+        Ranges: 21
+
+-- system.query_log for the query above: projections=['clickliv.minute_occupancy.proj_content_minute'], read_rows=58172
+-- checked: the base plan does not name the projection (True), the default plan does (True), and query_log confirms it ran (True)
