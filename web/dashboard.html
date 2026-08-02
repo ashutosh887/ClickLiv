@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ClickLiv dashboard, real-time foreground-only concurrency for SonyLIV streaming telemetry, on ClickHouse</title>
-<meta name="description" content="Real-time foreground-only concurrency for SonyLIV streaming telemetry, on ClickHouse. Per minute, hour or day, read live through one parameterized view.">
+<meta name="description" content="Real-time foreground-only concurrency for SonyLIV streaming telemetry, on ClickHouse. Filter by every dataset dimension, per minute, hour or day, read live through one parameterized view.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' fill='%23faff69'/%3E%3Cg fill='%23161616'%3E%3Crect x='4' y='5' width='5' height='26'/%3E%3Crect x='11' y='5' width='5' height='26'/%3E%3Crect x='18' y='5' width='5' height='26'/%3E%3Crect x='25' y='5' width='5' height='26'/%3E%3Crect x='4' y='16' width='26' height='4' fill='%23faff69'/%3E%3C/g%3E%3C/svg%3E">
 <style>
   :root {
     color-scheme: light;
     --bg: #ffffff; --soft: #f7f7f7; --line: #e4e4e4; --ink: #161616;
-    --muted: #595959; --yellow: #faff69;
+    --muted: #595959; --yellow: #faff69; --band: #ececec;
   }
   * { box-sizing: border-box; }
   body {
@@ -22,17 +22,23 @@
   a { color: inherit; }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
   h1 { font-size: 24px; letter-spacing: -0.02em; margin: 0 0 8px; font-weight: 640; }
+  h2 { font-size: 17px; letter-spacing: -0.015em; margin: 0 0 6px; font-weight: 640; }
   p { margin: 0 0 10px; }
   .sub { color: var(--muted); margin: 0; max-width: 64ch; }
+
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 3px; }
 
   .topbar {
     display: flex; align-items: baseline; justify-content: space-between;
     gap: 16px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--line);
   }
-  .mark { font-weight: 660; letter-spacing: -0.015em; text-decoration: none; font-size: 16px; }
+  .mark {
+    font-weight: 660; letter-spacing: -0.015em; text-decoration: none;
+    font-size: 16px; cursor: pointer;
+  }
   .mark em { font-style: normal; background: var(--yellow); padding: 0 3px; border-radius: 2px; }
   .topbar nav { display: flex; gap: 20px; font-size: 13.5px; color: var(--muted); }
-  .topbar nav a { text-decoration: none; }
+  .topbar nav a { text-decoration: none; cursor: pointer; }
   .topbar nav a:hover { color: var(--ink); }
 
   header { margin: 34px 0 26px; }
@@ -46,28 +52,101 @@
   .stat .v { font-size: 28px; font-weight: 620; font-variant-numeric: tabular-nums; margin-top: 5px; letter-spacing: -0.02em; }
   .stat .v mark { background: var(--yellow); padding: 0 3px; border-radius: 2px; color: inherit; }
 
-  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
-  label { color: var(--muted); font-size: 13px; }
-  select {
-    font: inherit; font-size: 14px; padding: 7px 10px; border-radius: 6px;
-    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  .filters {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+    gap: 10px 12px; margin-bottom: 12px;
   }
-  select:focus { outline: 2px solid var(--yellow); outline-offset: 1px; }
+  .field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  label { color: var(--muted); font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase; }
+  select {
+    font: inherit; font-size: 13.5px; padding: 7px 9px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+    cursor: pointer; width: 100%; text-overflow: ellipsis;
+  }
+  select:hover { border-color: #cfcfcf; }
+  select:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+  select.set { border-color: var(--ink); background: #fffdf0; }
+  .filterbar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 16px; min-height: 24px;
+  }
+  .applied { color: var(--muted); font-size: 13px; }
+  button.clear {
+    font: inherit; font-size: 13px; padding: 4px 11px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer;
+  }
+  button.clear:hover { border-color: var(--ink); }
   .hidden { display: none; }
 
   .chart { border: 1px solid var(--line); border-radius: 10px; padding: 18px; overflow-x: auto; }
   svg { display: block; width: 100%; height: auto; }
   .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
   .gridline { stroke: #ededed; stroke-width: 1; }
+  .band { fill: var(--band); }
   .area { fill: var(--yellow); opacity: 0.55; }
   .line { fill: none; stroke: var(--ink); stroke-width: 1.75; stroke-linejoin: round; }
+  .naive { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 5 4; stroke-linejoin: round; }
   .status { color: var(--muted); font-size: 13px; min-height: 20px; margin-top: 12px; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    font-size: 12.5px; color: var(--muted); margin-bottom: 12px;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .swatch { width: 22px; height: 10px; border-radius: 2px; flex: none; }
+  .swatch.fg { background: var(--yellow); border: 1px solid #e2e64a; }
+  .swatch.gap { background: var(--band); border: 1px solid #dcdcdc; }
+  .swatch.nv { height: 0; border: 0; border-top: 1.5px dashed var(--muted); border-radius: 0; }
+
+  details.sql { margin-top: 14px; border: 1px solid var(--line); border-radius: 10px; }
+  details.sql summary {
+    cursor: pointer; padding: 11px 16px; font-size: 13.5px; color: var(--muted);
+    list-style: none; display: flex; justify-content: space-between; gap: 12px;
+  }
+  details.sql summary::-webkit-details-marker { display: none; }
+  details.sql summary:hover { color: var(--ink); }
+  details.sql summary::after { content: "Show"; font-size: 12.5px; }
+  details.sql[open] summary::after { content: "Hide"; }
+  details.sql[open] summary { border-bottom: 1px solid var(--line); }
+  details.sql pre {
+    margin: 0; padding: 14px 16px; overflow-x: auto; background: var(--soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+    line-height: 1.55; white-space: pre;
+  }
+  details.sql pre + pre { border-top: 1px solid var(--line); }
+  details.sql .note { padding: 11px 16px; font-size: 12.5px; color: var(--muted); margin: 0; }
+
+  section.slices { margin-top: 40px; }
+  .group { margin-top: 18px; }
+  .group h3 {
+    font-size: 11.5px; letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600; margin: 0 0 8px;
+  }
+  .bars { display: grid; gap: 5px; }
+  .bar-row {
+    display: grid; grid-template-columns: minmax(96px, 150px) 1fr auto auto;
+    gap: 12px; align-items: center; font-size: 13px;
+  }
+  .bar-name { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-track { background: var(--soft); border-radius: 3px; height: 17px; overflow: hidden; }
+  .bar-fill { background: var(--yellow); height: 100%; border-radius: 3px; min-width: 2px; }
+  .bar-value { font-variant-numeric: tabular-nums; text-align: right; min-width: 56px; }
+  .bar-at {
+    font-variant-numeric: tabular-nums; color: var(--muted);
+    font-size: 12px; min-width: 92px; text-align: right;
+  }
+  .bar-at.off { color: var(--ink); }
+  .bar-at.off b { background: var(--yellow); padding: 0 3px; border-radius: 2px; font-weight: 500; }
 
   footer {
     margin-top: 44px; color: var(--muted); font-size: 13px;
     border-top: 1px solid var(--line); padding-top: 20px; max-width: 82ch;
   }
-  @media (max-width: 620px) { h1 { font-size: 21px; } }
+  @media (max-width: 620px) {
+    h1 { font-size: 21px; }
+    .bar-row { grid-template-columns: minmax(80px, 1fr) 1fr auto; }
+    .bar-at { display: none; }
+  }
   section, .hero { scroll-margin-top: 72px; }
   h2, h3 { scroll-margin-top: 72px; }
 </style>
@@ -88,39 +167,55 @@
   <header>
     <h1>Concurrency dashboard</h1>
     <p class="sub">Foreground-only concurrent viewers, filtered and bucketed by one parameterized
-    view. A viewer counts only while playing, foregrounded and heartbeat-fresh. Every figure on
-    this page is read live from ClickHouse Cloud.</p>
+    view. A viewer counts only while playing, foregrounded and heartbeat-fresh. Every filter below
+    is a dimension the dataset actually carries, and every figure on this page is read live from
+    ClickHouse Cloud.</p>
   </header>
 
   <div class="stats">
     <div class="stat"><div class="k">Peak, this slice</div><div class="v"><mark id="peak">&hellip;</mark></div></div>
-    <div class="stat"><div class="k">Naive, any open session</div><div class="v" id="naive">&hellip;</div></div>
-    <div class="stat"><div class="k">Overcount avoided</div><div class="v" id="overcount">&hellip;</div></div>
+    <div class="stat"><div class="k">Naive peak, whole dataset</div><div class="v" id="naive">&hellip;</div></div>
+    <div class="stat"><div class="k">Overcount, whole dataset</div><div class="v" id="overcount">&hellip;</div></div>
     <div class="stat"><div class="k">Server time, this query</div><div class="v" id="served">&hellip;</div></div>
   </div>
 
-  <div class="controls">
-    <label for="dataset" id="datasetLabel" class="hidden">Dataset</label>
-    <select id="dataset" class="hidden"></select>
-    <label for="platform">Platform</label>
-    <select id="platform"><option value="">All platforms</option></select>
-    <label for="videoType">Type</label>
-    <select id="videoType"><option value="">All types</option></select>
-    <label for="grain">Grain</label>
-    <select id="grain">
-      <option value="hour" selected>Hour</option>
-      <option value="minute">Minute</option>
-      <option value="day">Day</option>
-    </select>
+  <div class="filters" id="filters"></div>
+  <div class="filterbar">
+    <span class="applied" id="applied">No filters applied, showing every session.</span>
+    <button type="button" class="clear hidden" id="clear">Clear filters</button>
+  </div>
+
+  <div class="legend">
+    <span><i class="swatch fg"></i>Foreground only, what this project publishes</span>
+    <span class="hidden" id="legendNaive"><i class="swatch nv"></i>Naive, every open session</span>
+    <span class="hidden" id="legendGap"><i class="swatch gap"></i>The overcount naive would have added</span>
   </div>
 
   <div class="chart"><svg id="chart" viewBox="0 0 940 340" preserveAspectRatio="none"></svg></div>
   <p class="status" id="status">Loading&hellip;</p>
 
+  <details class="sql">
+    <summary>The ClickHouse query behind this curve</summary>
+    <pre id="sqlText"></pre>
+    <pre id="sqlParams"></pre>
+    <p class="note">One parameterized view answers every filter combination. Filtering happens
+    before the sum across the dimensions left unfiltered, and the maximum over minutes is taken
+    last, so a peak per slice is never read off a partial group.</p>
+  </details>
+
+  <section class="slices hidden" id="slices">
+    <h2>Peak minute by slice</h2>
+    <p class="sub" id="slicesLead"></p>
+    <div id="slicesGroups"></div>
+    <p class="status" id="slicesStatus"></p>
+  </section>
+
   <footer>
-    Served by <code id="servedBy">marts.v_concurrency</code> as <code>marts_agent</code>, a
-    read-only role with a ClickHouse-enforced query budget. The browser never receives a database
-    credential. Source at
+    Served by <code id="servedBy">marts.v_concurrency_full</code> as <code>marts_agent</code>, a
+    read-only role granted <code>SELECT</code> on the marts schema and nothing else, under a
+    server-enforced budget of 10 seconds, 2 GB and 200 million rows read per query. The role
+    cannot raise its own ceiling, and a write or a read outside marts is refused with
+    ClickHouse error 497. The browser never receives a database credential. Source at
     <a href="https://github.com/ashutosh887/ClickLiv">github.com/ashutosh887/ClickLiv</a>.
   </footer>
 </div>
@@ -128,14 +223,36 @@
 <script type="module">
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n).toLocaleString('en-US');
+const stamp = (value) => String(value ?? '').slice(5, 16);
+const ORDER = ['platform', 'video_type', 'content_id', 'country', 'category',
+  'audio_language', 'subtitle_language', 'video_resolution', 'show_name',
+  'app_version', 'player_version'];
 
+const filters = { grain: 'hour' };
 let dataset = '';
+let overallPeakAt = '';
+let built = false;
+let windows = [];
 
 function option(value, text) {
   const node = document.createElement('option');
   node.value = value;
   node.textContent = text;
   return node;
+}
+
+function show(node, visible) {
+  node.classList.toggle('hidden', !visible);
+}
+
+function humanize(name) {
+  const text = name.replace(/_/g, ' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function rank(name) {
+  const at = ORDER.indexOf(name);
+  return at === -1 ? ORDER.length : at;
 }
 
 async function loadDatasets() {
@@ -146,52 +263,227 @@ async function loadDatasets() {
     const rows = data.datasets || [];
     dataset = data.default || '';
     if (rows.length < 2) return;
+    const field = document.createElement('div');
+    field.className = 'field';
+    const label = document.createElement('label');
+    label.htmlFor = 'dataset';
+    label.textContent = 'Dataset';
+    const select = document.createElement('select');
+    select.id = 'dataset';
     for (const row of rows) {
       const window = row.window_from && row.window_to
         ? `, ${String(row.window_from).slice(0, 10)} to ${String(row.window_to).slice(0, 10)}`
         : '';
-      $('dataset').append(option(row.name, `${row.name}${window}`));
+      select.append(option(row.name, `${row.name}${window}`));
     }
-    $('dataset').value = dataset;
-    $('dataset').classList.remove('hidden');
-    $('datasetLabel').classList.remove('hidden');
+    select.value = dataset;
+    select.addEventListener('change', async () => {
+      dataset = select.value;
+      built = false;
+      $('filters').replaceChildren(field);
+      for (const key of Object.keys(filters)) delete filters[key];
+      await Promise.all([loadCatalogue(), load()]);
+    });
+    field.append(label, select);
+    $('filters').append(field);
   } catch (error) {
     dataset = '';
   }
 }
 
-function withDataset(params) {
-  if (dataset) params.set('dataset', dataset);
-  return params;
+function chosenWindow() {
+  return windows.find((row) => row.key === filters.window) || null;
 }
 
-async function loadDimensions() {
-  $('platform').replaceChildren(option('', 'All platforms'));
-  $('videoType').replaceChildren(option('', 'All types'));
-  const res = await fetch(`/api/dimensions?${withDataset(new URLSearchParams())}`);
-  if (!res.ok) return;
-  const data = await res.json();
-  for (const row of data.platforms || []) {
-    $('platform').append(option(row.name, `${row.name} (${fmt(row.peak)})`));
+function params(extra = {}) {
+  const search = new URLSearchParams();
+  if (dataset) search.set('dataset', dataset);
+  for (const [name, value] of Object.entries(filters)) {
+    if (value && name !== 'window') search.set(name, value);
   }
-  for (const row of data.video_types || []) {
-    $('videoType').append(option(row.name, `${row.name} (${fmt(row.peak)})`));
+  const window = chosenWindow();
+  if (window) {
+    search.set('minute_from', window.minute_from);
+    search.set('minute_to', window.minute_to);
   }
-  const head = data.headline;
-  if (!head) return;
-  $('naive').textContent = fmt(head.naive_peak);
-  $('overcount').textContent = `${head.peak_overcount_pct.toFixed(0)}%`;
-  $('served').textContent = `${fmt(head.server_ms)} ms`;
+  for (const [name, value] of Object.entries(extra)) search.set(name, value);
+  return search;
 }
 
-function draw(rows) {
+function control(name, label, options) {
+  const field = document.createElement('div');
+  field.className = 'field';
+  const tag = document.createElement('label');
+  tag.htmlFor = `f_${name}`;
+  tag.textContent = label;
+  const select = document.createElement('select');
+  select.id = `f_${name}`;
+  select.append(...options);
+  select.value = filters[name] || '';
+  select.addEventListener('change', async () => {
+    filters[name] = select.value;
+    select.classList.toggle('set', Boolean(select.value));
+    applied();
+    await Promise.all([loadCatalogue(), load()]);
+  });
+  field.append(tag, select);
+  return field;
+}
+
+function applied() {
+  const skip = new Set(['grain', 'window']);
+  const set = Object.entries(filters).filter(([name, value]) => value && !skip.has(name));
+  $('applied').textContent = set.length
+    ? `${set.length} filter${set.length > 1 ? 's' : ''} applied: `
+      + set.map(([name, value]) => `${humanize(name).toLowerCase()} ${value}`).join(', ')
+    : 'No filters applied, showing every session.';
+  show($('clear'), set.length > 0);
+}
+
+function build(data) {
+  const fields = [];
+  const names = [...(data.filterable || [])].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  for (const name of names) {
+    const rows = data.values[name] || [];
+    fields.push(control(name, humanize(name), [
+      option('', `All ${humanize(name).toLowerCase()}`),
+      ...rows.map((row) => option(row.value, row.value)),
+    ]));
+  }
+  if ((data.titles || []).length) {
+    fields.push(control('content_id', 'Title', [
+      option('', 'All titles'),
+      ...data.titles.map((row) => option(row.content_id, row.title)),
+    ]));
+  }
+  if ((data.windows || []).length > 1) {
+    fields.push(control('window', 'Window',
+      data.windows.map((row) => option(row.key, row.label))));
+  }
+  fields.push(control('grain', 'Grain', [
+    option('hour', 'Hour'), option('minute', 'Minute'), option('day', 'Day'),
+  ]));
+  $('filters').append(...fields);
+  built = true;
+}
+
+function bars(node, rows, top) {
+  node.replaceChildren();
+  for (const row of rows) {
+    const line = document.createElement('div');
+    line.className = 'bar-row';
+
+    const name = document.createElement('div');
+    name.className = 'bar-name';
+    name.textContent = row.name;
+    name.title = row.name;
+
+    const track = document.createElement('div');
+    track.className = 'bar-track';
+    const fill = document.createElement('div');
+    fill.className = 'bar-fill';
+    fill.style.width = `${Math.max(1, (row.peak / top) * 100).toFixed(1)}%`;
+    track.append(fill);
+
+    const value = document.createElement('div');
+    value.className = 'bar-value';
+    value.textContent = fmt(row.peak);
+
+    const at = document.createElement('div');
+    at.className = 'bar-at';
+    if (row.peak_at) {
+      const differs = overallPeakAt && row.peak_at !== overallPeakAt;
+      at.classList.toggle('off', Boolean(differs));
+      if (differs) {
+        const strong = document.createElement('b');
+        strong.textContent = stamp(row.peak_at);
+        at.append(strong);
+      } else {
+        at.textContent = stamp(row.peak_at);
+      }
+    }
+
+    line.append(name, track, value, at);
+    node.append(line);
+  }
+}
+
+function drawSlices(data) {
+  const groups = Object.entries(data.crossover || {})
+    .filter(([, rows]) => rows.length);
+  if (!groups.length) { show($('slices'), false); return; }
+  overallPeakAt = data.overall_peak_at || '';
+  const every = groups.flatMap(([, rows]) => rows);
+  const top = Math.max(...every.map((row) => row.peak), 1);
+
+  const holder = $('slicesGroups');
+  holder.replaceChildren();
+  for (const [dimension, rows] of groups) {
+    const group = document.createElement('div');
+    group.className = 'group';
+    const title = document.createElement('h3');
+    title.textContent = humanize(dimension);
+    const list = document.createElement('div');
+    list.className = 'bars';
+    bars(list, rows, top);
+    group.append(title, list);
+    holder.append(group);
+  }
+
+  const minutes = new Set(every.map((row) => row.peak_at).filter(Boolean));
+  if (overallPeakAt) minutes.add(overallPeakAt);
+  const slices = every.length + (overallPeakAt ? 1 : 0);
+  const scope = Object.keys(data.filters || {}).length
+    ? ' Every row also carries the other filters applied above, with its own dimension replaced'
+      + ' by the value on that row.'
+    : '';
+  $('slicesLead').textContent =
+    `Each row is its own call to the same parameterized view, at minute grain. `
+    + `${minutes.size} distinct peak minutes across ${slices} slices, so the busiest minute `
+    + `overall is not the busiest minute for every slice. Highlighted times differ from the `
+    + `peak of the current selection at ${stamp(overallPeakAt)} UTC.${scope}`;
+  $('slicesStatus').textContent =
+    `${slices} slices read from ${data.schema}.v_concurrency_full`
+    + (data.rows_read ? `, ${fmt(data.rows_read)} rows read server side` : '');
+  show($('slices'), true);
+}
+
+async function loadCatalogue() {
+  try {
+    const res = await fetch(`/api/dimensions?${params()}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!built) {
+      windows = data.windows || [];
+      if (!filters.window) filters.window = data.default_window || '';
+      build(data);
+    }
+    const head = data.headline;
+    if (head) {
+      $('naive').textContent = fmt(head.naive_peak);
+      $('overcount').textContent = `${head.peak_overcount_pct.toFixed(0)}%`;
+    }
+    drawSlices(data);
+  } catch (error) {
+    show($('slices'), false);
+  }
+}
+
+function draw(rows, naive) {
   const svg = $('chart');
-  svg.innerHTML = '';
-  if (!rows.length) { $('status').textContent = 'No data for that slice.'; return; }
+  svg.replaceChildren();
+  show($('legendNaive'), false);
+  show($('legendGap'), false);
+  if (!rows.length) { $('status').textContent = 'No data for that slice.'; return false; }
+
+  const overlay = naive ? new Map(naive.rows) : null;
+  const paired = overlay
+    ? rows.every((r) => overlay.get(Number(r.bucket_minute)) !== undefined)
+    : false;
 
   const W = 940, H = 340, L = 56, R = 14, T = 16, B = 34;
   const iw = W - L - R, ih = H - T - B;
-  const top = Math.max(...rows.map((r) => r.peak_concurrency)) || 1;
+  const top = Math.max(paired ? naive.peak : 0, ...rows.map((r) => r.peak_concurrency)) || 1;
   const x = (i) => L + (rows.length === 1 ? iw / 2 : (i / (rows.length - 1)) * iw);
   const y = (v) => T + ih - (v / top) * ih;
 
@@ -201,50 +493,89 @@ function draw(rows) {
     parts.push(`<line class="gridline" x1="${L}" y1="${py}" x2="${W - R}" y2="${py}"/>`);
     parts.push(`<text class="axis" x="${L - 8}" y="${py + 4}" text-anchor="end">${fmt(v)}</text>`);
   }
-  const line = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(r.peak_concurrency).toFixed(1)}`).join('');
-  parts.push(`<path class="area" d="${line}L${x(rows.length - 1).toFixed(1)},${y(0)}L${x(0).toFixed(1)},${y(0)}Z"/>`);
+
+  const path = (pick) => rows
+    .map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(pick(r)).toFixed(1)}`).join('');
+  const line = path((r) => r.peak_concurrency);
+  const floor = `L${x(rows.length - 1).toFixed(1)},${y(0)}L${x(0).toFixed(1)},${y(0)}Z`;
+
+  if (paired) {
+    const upper = path((r) => overlay.get(Number(r.bucket_minute)));
+    const back = rows.map((r, i) => {
+      const at = rows.length - 1 - i;
+      return `L${x(at).toFixed(1)},${y(rows[at].peak_concurrency).toFixed(1)}`;
+    }).join('');
+    parts.push(`<path class="band" d="${upper}${back}Z"/>`);
+    parts.push(`<path class="area" d="${line}${floor}"/>`);
+    parts.push(`<path class="naive" d="${upper}"/>`);
+  } else {
+    parts.push(`<path class="area" d="${line}${floor}"/>`);
+  }
   parts.push(`<path class="line" d="${line}"/>`);
 
   const step = Math.max(1, Math.ceil(rows.length / 7));
-  rows.forEach((r, i) => {
-    if (i % step && i !== rows.length - 1) return;
-    parts.push(`<text class="axis" x="${x(i).toFixed(1)}" y="${H - 12}" text-anchor="middle">${String(r.bucket_start).slice(5, 16)}</text>`);
-  });
+  const last = rows.length - 1;
+  const marks = [];
+  for (let i = 0; i <= last; i += step) marks.push(i);
+  if (marks[marks.length - 1] !== last && last - marks[marks.length - 1] >= step / 2) {
+    marks.push(last);
+  }
+  for (const i of marks) {
+    const anchor = i === 0 ? 'start' : i === last ? 'end' : 'middle';
+    parts.push(`<text class="axis" x="${x(i).toFixed(1)}" y="${H - 12}" text-anchor="${anchor}">${stamp(rows[i].bucket_start)}</text>`);
+  }
   svg.innerHTML = parts.join('');
+
+  show($('legendNaive'), paired);
+  show($('legendGap'), paired);
+  return paired;
 }
 
 async function load() {
   $('status').textContent = 'Loading…';
-  const params = withDataset(new URLSearchParams({
-    grain: $('grain').value,
-    platform: $('platform').value,
-    video_type: $('videoType').value,
-  }));
   try {
-    const res = await fetch(`/api/concurrency?${params}`);
+    const res = await fetch(`/api/concurrency?${params({ grain: filters.grain || 'hour' })}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.statusText);
     $('peak').textContent = fmt(data.peak);
-    if (data.schema) $('servedBy').textContent = `${data.schema}.v_concurrency`;
-    draw(data.rows);
-    const read = data.statistics?.rows_read;
+    if (data.schema) $('servedBy').textContent = `${data.schema}.v_concurrency_full`;
+    const elapsed = data.statistics?.elapsed;
+    if (elapsed !== undefined) $('served').textContent = `${fmt(Math.round(elapsed * 1000))} ms`;
+    if (data.sql) {
+      $('sqlText').textContent = data.sql;
+      $('sqlParams').textContent = Object.entries(data.parameters || {})
+        .map(([name, value]) => `${name} = ${typeof value === 'string' && !/^\d+$/.test(value)
+          ? `'${value}'` : value}`).join('\n');
+    }
+    const paired = draw(data.rows, data.naive);
+    const read = Number(data.statistics?.rows_read || 0)
+      + (paired ? Number(data.naive.rows_read || 0) : 0);
+    const window = chosenWindow();
     $('status').textContent =
       `${fmt(data.rows.length)} buckets at ${data.grain} grain on dataset ${data.dataset}`
-      + (read ? `, ${fmt(read)} rows read server side` : '');
+      + (window ? `, ${window.label.toLowerCase()}` : '')
+      + (read ? `, ${fmt(read)} rows read server side` : '')
+      + (paired ? ', both curves over the same minutes' : '');
   } catch (error) {
     $('status').textContent = `Could not load: ${error.message}`;
   }
 }
 
-$('dataset').addEventListener('change', async () => {
-  dataset = $('dataset').value;
-  await loadDimensions();
-  await load();
+$('clear').addEventListener('click', async () => {
+  for (const key of Object.keys(filters)) {
+    if (key !== 'grain' && key !== 'window') filters[key] = '';
+  }
+  for (const select of $('filters').querySelectorAll('select')) {
+    if (['dataset', 'f_grain', 'f_window'].includes(select.id)) continue;
+    select.value = '';
+    select.classList.remove('set');
+  }
+  applied();
+  await Promise.all([loadCatalogue(), load()]);
 });
-for (const id of ['platform', 'videoType', 'grain']) $(id).addEventListener('change', load);
 
 await loadDatasets();
-await loadDimensions();
+await loadCatalogue();
 await load();
 </script>
 </body>

@@ -1,4 +1,4 @@
-import { datasets, schemaFor, send, query } from './_clickhouse.js';
+import { datasets, failure, schemaFor, send, query } from './_clickhouse.js';
 
 const WINDOW = `
 SELECT min_utc, max_utc, round(span_days, 2) AS span_days,
@@ -40,6 +40,6 @@ export default async function handler(req, res) {
       datasets: distinct,
     }, 60);
   } catch (error) {
-    return send(res, 502, { error: String(error.message || error) }, 0);
+    return send(res, 502, { error: failure(error) }, 0);
   }
 }

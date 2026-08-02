@@ -35,7 +35,7 @@
   }
   .mark { font-weight: 660; letter-spacing: -0.015em; text-decoration: none; font-size: 16px; }
   .mark em { font-style: normal; background: var(--yellow); padding: 0 3px; border-radius: 2px; }
-  .topbar nav { display: flex; gap: 20px; font-size: 13.5px; color: var(--muted); }
+  .topbar nav { display: flex; flex-wrap: wrap; gap: 10px 20px; font-size: 13.5px; color: var(--muted); }
   .topbar nav a { text-decoration: none; }
   .topbar nav a:hover { color: var(--ink); }
 
@@ -66,6 +66,7 @@
     display: inline-flex; align-items: center; font-size: 11px;
     letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink);
   }
+  .live.stale { color: var(--muted); }
 
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px; margin: 26px 0 0; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .stat { background: var(--bg); padding: 15px 17px; }
@@ -121,28 +122,10 @@
     border-top: 1px solid var(--line); padding-top: 20px; max-width: 82ch;
   }
 
-  @media (max-width: 620px) {
-    .hero h1 { font-size: 30px; }
-    .lead { font-size: 16.5px; }
-    .claim { padding: 18px; }
-    .claim p { font-size: 16px; }
-  }
-  footer .stack { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  footer .stack > span:first-child { color: var(--muted); margin-right: 4px; }
-  footer .chip { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px;
-    font-size: 12px; color: var(--ink); background: var(--bg); white-space: nowrap; }
   .topbar nav a.gh { display: inline-flex; align-items: center; gap: 6px; }
-  .tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1px;
-    background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .tool { background: var(--bg); padding: 16px 18px; display: flex; flex-direction: column; gap: 4px; }
-  .tool b { font-size: 15.5px; font-weight: 620; letter-spacing: -0.01em; }
-  .tool span { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
-  .tool:hover { background: var(--soft); }
-  .tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
-    gap: 10px; background: none; border: 0; }
+  .tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: 10px; }
   .tool { background: var(--bg); border: 1px solid var(--line); border-radius: 9px;
     padding: 14px 16px; display: flex; gap: 11px; align-items: flex-start; }
-  .tool:hover { border-color: var(--ink); }
   .tool > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .tool b { font-size: 14.5px; font-weight: 620; letter-spacing: -0.01em; }
   .tool span { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
@@ -151,13 +134,17 @@
   .mk.mono { display: inline-flex; align-items: center; justify-content: center; padding: 0;
     font-size: 10.5px; font-weight: 680; letter-spacing: -0.02em; background: var(--yellow);
     border-color: var(--yellow); color: var(--ink); }
-  .card { position: relative; }
-  .card .tag { position: absolute; top: 13px; right: 14px; font-size: 10.5px;
-    letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
-    border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; background: var(--bg); }
-  .card h3 { padding-right: 96px; }
-  section, .hero { scroll-margin-top: 72px; }
-  h2, h3 { scroll-margin-top: 72px; }
+
+  section, h2, h3 { scroll-margin-top: 72px; }
+  .mark, .topbar nav a, .btn, .card { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  @media (max-width: 620px) {
+    .hero h1 { font-size: 30px; }
+    .lead { font-size: 16.5px; }
+    .claim { padding: 18px; }
+    .claim p { font-size: 16px; }
+  }
 </style>
 </head>
 <body>
@@ -189,7 +176,7 @@
   <section>
     <h2>The result</h2>
     <div class="claim">
-      <p id="claim">Counting every open session instead overstates peak concurrency by
+      <p>Counting every open session instead overstates peak concurrency by
         <span class="num" id="peakOver">&hellip;</span> and average concurrency by
         <span class="num" id="avgOver">&hellip;</span>.
         <span id="minuteClause"></span></p>
@@ -229,7 +216,7 @@
       <div class="node">active_intervals</div><div class="arrow">&rarr;</div>
       <div class="node">minute_occupancy</div><div class="arrow">&rarr;</div>
       <div class="node on">marts.v_concurrency</div><div class="arrow">&rarr;</div>
-      <div class="node">dashboard, chat, notebooks</div>
+      <div class="node">dashboard, chat, answer bundle</div>
       <div class="aside">The same intervals also feed <code>minute_deltas</code>,
         <code>maxIntersections</code> and a Python reference that reads the CSV directly.
         Twelve checks diff all four.</div>
@@ -295,35 +282,36 @@
     <h2>Live surfaces</h2>
     <div class="cards">
       <a class="card" href="/dashboard">
-        <span class="tag">ClickHouse</span><h3>Concurrency dashboard</h3>
-        <p>The curve and every filter, read live through the same parameterized view every other
-        consumer uses. Proves the serving layer answers arbitrary slices at minute grain.</p>
+        <h3>Concurrency dashboard</h3>
+        <p>The curve and every filter, read live from ClickHouse through the same parameterized
+        view every other consumer uses. Proves the serving layer answers arbitrary slices at
+        minute grain.</p>
         <div class="host">clickliv.vercel.app/dashboard</div>
       </a>
       <a class="card" href="https://librechat.15-252-63-157.sslip.io">
-        <span class="tag">MCP</span><h3>LibreChat</h3>
+        <h3>LibreChat</h3>
         <p>Ask the same questions in plain language. Proves a warehouse is safe to point a model at,
         through pre-vetted MCP tools whose filter values are checked against the data itself.</p>
         <div class="host">librechat.15-252-63-157.sslip.io</div>
       </a>
       <a class="card" href="https://langfuse.15-252-63-157.sslip.io">
-        <span class="tag">ClickHouse</span><h3>Langfuse</h3>
+        <h3>Langfuse</h3>
         <p>Every model and tool call traced. Proves the observability pillar is a second ClickHouse
         workload, with traces in ClickHouse Cloud and transactional state in ClickHouse managed
         Postgres.</p>
         <div class="host">langfuse.15-252-63-157.sslip.io</div>
       </a>
       <a class="card" href="https://clickstack.15-252-63-157.sslip.io">
-        <span class="tag">OpenTelemetry</span><h3>ClickStack</h3>
-        <p>One span per pipeline stage, per ingest and per query, carrying what the server itself
-        recorded. Proves the latency figures are read from <code>system.query_log</code> rather
-        than from a client stopwatch.</p>
+        <h3>ClickStack</h3>
+        <p>One OpenTelemetry span per pipeline stage, per ingest and per query, carrying what the
+        server itself recorded. Proves the latency figures are read from
+        <code>system.query_log</code> rather than from a client stopwatch.</p>
         <div class="host">clickstack.15-252-63-157.sslip.io</div>
       </a>
       <a class="card" href="https://github.com/ashutosh887/ClickLiv">
-        <span class="tag">MIT</span><h3>Source and evidence</h3>
-        <p>The SQL, the gates, the answer bundle and a manifest with a hash per file. Proves every
-        number here is reproducible from a clean clone in two commands.</p>
+        <h3>Source and evidence</h3>
+        <p>The SQL, the gates, the answer bundle and a manifest with a hash per file, MIT licensed.
+        Proves every number here is reproducible from a clean clone in three commands.</p>
         <div class="host">github.com/ashutosh887/ClickLiv</div>
       </a>
     </div>
@@ -392,7 +380,6 @@
     proxy authenticating as <code>marts_agent</code>, a read-only role with a query budget the
     server enforces. No database credential reaches the browser and no admin credential exists in
     that environment. Everything else on this page is prose about the method. MIT licensed.
-
   </footer>
 </div>
 
@@ -444,7 +431,7 @@ try {
     + ' not return, so nothing is shown in their place. The measured run is in the repository.';
 }
 
-for (const path of ['/api/datasets', '/api/dimensions', '/api/concurrency?grain=60']) {
+for (const path of ['/api/datasets', '/api/dimensions', '/api/concurrency?grain=hour']) {
   fetch(path, { cache: 'force-cache' }).catch(() => {});
 }
 </script>

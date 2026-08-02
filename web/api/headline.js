@@ -1,4 +1,4 @@
-import { config, query, resolve, send } from './_clickhouse.js';
+import { config, failure, query, resolve, send } from './_clickhouse.js';
 
 const OVERCOUNT = (schema) => `
 SELECT foreground_peak, foreground_peak_utc, naive_peak, naive_peak_utc,
@@ -41,8 +41,8 @@ export default async function handler(req, res) {
       occupancy_rows: Number(rows ?? 0),
       server_ms: Math.round((overcount.statistics?.elapsed ?? 0) * 1000),
       served_by: `${schema}.v_overcount as ${config().user}, readonly with a query budget`,
-    }, 300);
+    }, 60);
   } catch (error) {
-    return send(res, 502, { error: String(error.message || error) }, 0);
+    return send(res, 502, { error: failure(error) }, 0);
   }
 }
