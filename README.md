@@ -58,7 +58,11 @@ on one EC2 instance in `ap-south-1` behind Caddy for automatic HTTPS.
 
 ## Demo Video
 
-`docs/demo.md` carries the recorded 2 to 3 minute walkthrough link and the pitch deck PDF.
+**<https://youtu.be/RCbLC5MoHrw>**, the recorded 2 to 3 minute walkthrough: the concurrency
+curve and its filters live against the hosted demo, the conversational layer answering in
+English, then the correctness gates and the `query_log` evidence behind every number below.
+
+The pitch deck is [`docs/pitch-deck.pdf`](docs/pitch-deck.pdf), 14 slides.
 
 ---
 
