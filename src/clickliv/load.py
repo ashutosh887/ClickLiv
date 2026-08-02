@@ -1,6 +1,5 @@
-"""CSV ingestion. Content must land before events (D12), and that is asserted, not assumed.
-The header of the file in hand decides the input schema, so a fresh day cannot silently
-default a column away. See docs/unseen-day.md."""
+"""CSV ingestion. Content lands before events (D12), asserted rather than assumed, and
+the header in hand decides the input schema. See docs/unseen-day.md."""
 
 from __future__ import annotations
 
@@ -33,9 +32,9 @@ RAW_TYPES = {
     "player_version": "String", "session_start_epoch": "Int64",
 }
 
-CONTENT_STRUCTURE = ", ".join(f"{n} {t}" for n, t in CONTENT_TYPES.items())
+CONTENT_OPTIONAL = {"show_name": "String"}
 
-RAW_STRUCTURE = ", ".join(f"{n} {t}" for n, t in RAW_TYPES.items())
+RAW_OPTIONAL = {"video_resolution": "String"}
 
 DELIMITERS = (",", "\t", ";", "|")
 
@@ -45,9 +44,13 @@ MEMBER_SUFFIXES = (".csv", ".tsv", ".txt", ".gz", ".bz2", ".zst")
 
 UNPACKED: dict[Path, Path] = {}
 
-CONTENT_PROJECTION = "toUInt64(content_id), title, video_type, category"
+def content_projection(sh: Shape) -> str:
+    return (f"toUInt64(content_id), title, video_type, category, "
+            f"{sh.value('show_name')}")
 
-RAW_PROJECTION = """
+
+def raw_projection(sh: Shape) -> str:
+    return f"""
     video_session_id,
     fromUnixTimestamp64Milli(event_timestamp, 'UTC'),
     user_id,
@@ -60,17 +63,18 @@ RAW_PROJECTION = """
     audio_language,
     subtitle_language,
     player_version,
-    fromUnixTimestamp64Milli(session_start_epoch, 'UTC')
+    fromUnixTimestamp64Milli(session_start_epoch, 'UTC'),
+    {sh.value('video_resolution')}
 """
 
 
-def content_insert(source: str) -> str:
-    return (f"INSERT INTO content_meta SELECT {CONTENT_PROJECTION} "
+def content_insert(source: str, sh: Shape) -> str:
+    return (f"INSERT INTO content_meta SELECT {content_projection(sh)} "
             f"FROM {source} WHERE content_id >= 0")
 
 
-def raw_insert(source: str) -> str:
-    return f"INSERT INTO raw_events SELECT {RAW_PROJECTION} FROM {source}"
+def raw_insert(source: str, sh: Shape) -> str:
+    return f"INSERT INTO raw_events SELECT {raw_projection(sh)} FROM {source}"
 
 
 INSERT_SETTINGS = {
@@ -188,27 +192,45 @@ def unpack(path: Path) -> Path:
 
 @dataclass(frozen=True)
 class Shape:
-    """What a CSV actually looks like: header after renaming, delimiter, compression."""
+    """What a CSV actually looks like: header after renaming, delimiter, compression, and
+    the type map it was bound against, required and optional columns together."""
 
     path: Path
     header: tuple[str, ...]
     delimiter: str
     gzipped: bool
+    types: dict[str, str]
+    optional: tuple[str, ...] = ()
 
-    def structure(self, types: dict[str, str]) -> str:
+    def structure(self) -> str:
         return ", ".join(
-            f"`{name}` {types[name]}" if name in types else f"`ignored_{i}` String"
+            f"`{name}` {self.types[name]}" if name in self.types else f"`ignored_{i}` String"
             for i, name in enumerate(self.header))
+
+    def has(self, name: str) -> bool:
+        return name in self.header
+
+    def value(self, name: str) -> str:
+        """The column if this file carries it, an empty literal if it does not, so one
+        schema serves a file with the column and a file without it."""
+        return name if self.has(name) else "''"
 
     def settings(self) -> dict:
         extra = {} if self.delimiter == "," else {"format_csv_delimiter": self.delimiter}
         return {**INSERT_SETTINGS, **extra}
 
-    def describe(self, types: dict[str, str]) -> str:
-        extra = [name for name in self.header if name not in types]
+    def unknown(self) -> list[str]:
+        return [name for name in self.header if name not in self.types]
+
+    def describe(self) -> str:
+        extra = self.unknown()
+        carried = [name for name in self.optional if self.has(name)]
+        absent = [name for name in self.optional if not self.has(name)]
         return (f"{self.path.name:<34} {len(self.header)} columns"
                 f"{'' if self.delimiter == ',' else f', delimiter {self.delimiter!r}'}"
                 f"{', gzip' if self.gzipped else ''}"
+                f"{'' if not carried else ', carries ' + ', '.join(carried)}"
+                f"{'' if not absent else ', empty for ' + ', '.join(absent)}"
                 f"{'' if not extra else f', ignoring {len(extra)} extra: ' + ', '.join(extra)}")
 
 
@@ -237,22 +259,26 @@ def column_names(line: str, delimiter: str, types: dict[str, str]) -> tuple[str,
     return tuple(names)
 
 
-def shape(path: Path, types: dict[str, str]) -> Shape:
-    """Read the real header and fail loudly on a missing column. Without this a renamed
-    or dropped column inserts a silent default and the answers are quietly wrong."""
+def shape(path: Path, types: dict[str, str],
+          optional: dict[str, str] | None = None) -> Shape:
+    """Read the real header and fail loudly on a missing required column. Optional
+    columns bind when present and default to empty when absent."""
+    optional = optional or {}
+    known = {**types, **optional}
     with open_text(path) as fh:
         line = fh.readline()
     if not line.strip():
         raise SystemExit(f"{path} has no header row")
     delimiter = max(DELIMITERS, key=line.count)
-    header = column_names(line, delimiter, types)
+    header = column_names(line, delimiter, known)
     missing = [name for name in types if name not in header]
     if missing:
         raise SystemExit(
             f"{path} is missing required column(s): {', '.join(missing)}\n"
             f"header found: {', '.join(header)}\n"
             f"map a renamed column with CSV_RENAME=their_name=our_name,...")
-    return Shape(path, header, delimiter, path.suffix.lower() == ".gz")
+    return Shape(path, header, delimiter, path.suffix.lower() == ".gz", known,
+                 tuple(optional))
 
 
 def ingest(ch: ClickHouse, table: str, statement: str, sh: Shape) -> int:
@@ -287,17 +313,17 @@ def load(ch: ClickHouse) -> None:
         if not path.exists():
             raise SystemExit(f"missing input: {path}")
 
-    content_shape = shape(content_csv(), CONTENT_TYPES)
-    raw_shape = shape(raw_csv(), RAW_TYPES)
-    print(content_shape.describe(CONTENT_TYPES))
-    print(raw_shape.describe(RAW_TYPES))
+    content_shape = shape(content_csv(), CONTENT_TYPES, CONTENT_OPTIONAL)
+    raw_shape = shape(raw_csv(), RAW_TYPES, RAW_OPTIONAL)
+    print(content_shape.describe())
+    print(raw_shape.describe())
 
     ch.command("TRUNCATE TABLE content_meta")
     ch.command("TRUNCATE TABLE raw_events")
 
     n_content = ingest(ch, "content_meta", content_insert(
-        f"input('{content_shape.structure(CONTENT_TYPES)}')") + "\nFORMAT CSVWithNames",
-        content_shape)
+        f"input('{content_shape.structure()}')", content_shape)
+        + "\nFORMAT CSVWithNames", content_shape)
 
     with open_text(content_csv()) as fh:
         source_rows = sum(1 for _ in csv.reader(fh, delimiter=content_shape.delimiter)) - 1
@@ -311,7 +337,8 @@ def load(ch: ClickHouse) -> None:
         )
     reload_dictionary_everywhere(ch)
     ingest(ch, "raw_events", raw_insert(
-        f"input('{raw_shape.structure(RAW_TYPES)}')") + "\nFORMAT CSVWithNames", raw_shape)
+        f"input('{raw_shape.structure()}')", raw_shape) + "\nFORMAT CSVWithNames",
+        raw_shape)
 
 
 RECONCILE_QUERY = """
@@ -396,6 +423,7 @@ def scan_content(sh: Shape) -> dict:
     index = {name: i for i, name in enumerate(sh.header)}
     ids: set[int] = set()
     video_types: dict[str, int] = {}
+    show_names: set[str] = set()
     ragged = negative = rows = 0
     for values in data_rows(sh):
         rows += 1
@@ -413,8 +441,10 @@ def scan_content(sh: Shape) -> dict:
         ids.add(cid)
         kind = values[index["video_type"]]
         video_types[kind] = video_types.get(kind, 0) + 1
+        if sh.has("show_name"):
+            show_names.add(values[index["show_name"]])
     return {"rows": rows, "ids": ids, "video_types": video_types,
-            "ragged": ragged, "negative": negative}
+            "show_names": show_names, "ragged": ragged, "negative": negative}
 
 
 def scan_events(sh: Shape, content_ids: set[int]) -> dict:
@@ -422,7 +452,10 @@ def scan_events(sh: Shape, content_ids: set[int]) -> dict:
     property of the file alone, so it is knowable while the live tables are still up."""
     index = {name: i for i, name in enumerate(sh.header)}
     columns = len(sh.header)
-    counters = {name: {} for name in ("event_type", "event", "platform", "country")}
+    tracked = ["event_type", "event", "platform", "country"]
+    if sh.has("video_resolution"):
+        tracked.append("video_resolution")
+    counters = {name: {} for name in tracked}
     sessions: dict[str, list] = {}
     beats: dict[str, set] = {}
     stamps: dict[str, set] = {}
@@ -505,9 +538,8 @@ def top(counter: dict[str, int], limit: int = 8) -> str:
 
 
 def cadence_check(events: dict, problems: list[str], warnings: list[str]) -> None:
-    """The highest severity assumption in the pipeline. GRACE_SECONDS credits a session
-    for that long after each heartbeat, so a slower cadence than the grace leaves a hole
-    in every session and collapses the peak into a plausible looking wrong number."""
+    """The highest severity assumption in the pipeline: a heartbeat cadence slower than
+    GRACE_SECONDS holes every session and collapses the peak into a plausible wrong one."""
     grace = float(os.environ.get("GRACE_SECONDS", "40"))
     gap = float(os.environ.get("GAP_SECONDS", "90"))
     histogram = events["histogram"]
@@ -555,6 +587,22 @@ def slice_check(events: dict, content: dict, warnings: list[str]) -> None:
                             f"will answer zero")
 
 
+def column_check(content: Shape, raw: Shape, warnings: list[str]) -> None:
+    """Name every column this run binds, defaults and all, so a dimension arriving under a
+    name we do not know is visible here rather than silently dropped."""
+    for label, sh in (("content", content), ("events", raw)):
+        for name in sh.optional:
+            print(f"{label:<9} {name} {'present, loaded as a dimension' if sh.has(name) else 'absent, loaded as empty'}")
+        unknown = sh.unknown()
+        if unknown:
+            warnings.append(
+                f"the {label} file carries {len(unknown)} column(s) this pipeline does not "
+                f"know and will drop: {', '.join(unknown)}. If one of them is a dimension "
+                f"the answers need, map it with CSV_RENAME=their_name=our_name or add it "
+                f"to {'CONTENT_OPTIONAL' if label == 'content' else 'RAW_OPTIONAL'} in "
+                f"load.py and to the pipeline SQL.")
+
+
 def vocabulary_check(events: dict, problems: list[str], warnings: list[str]) -> None:
     from .reference import VOCABULARY
 
@@ -581,15 +629,16 @@ def preflight() -> bool:
         if path.stat().st_size == 0:
             raise SystemExit(f"empty input: {path}")
 
-    content_shape = shape(content_csv(), CONTENT_TYPES)
-    raw_shape = shape(raw_csv(), RAW_TYPES)
-    print(content_shape.describe(CONTENT_TYPES))
-    print(raw_shape.describe(RAW_TYPES))
+    content_shape = shape(content_csv(), CONTENT_TYPES, CONTENT_OPTIONAL)
+    raw_shape = shape(raw_csv(), RAW_TYPES, RAW_OPTIONAL)
+    print(content_shape.describe())
+    print(raw_shape.describe())
 
     content = scan_content(content_shape)
     events = scan_events(raw_shape, content["ids"])
     problems: list[str] = []
     warnings: list[str] = []
+    column_check(content_shape, raw_shape, warnings)
 
     if not events["rows"]:
         raise SystemExit(f"{raw_shape.path} has a header and no data rows")
@@ -601,12 +650,16 @@ def preflight() -> bool:
                 f"{(events['high'] - events['low']) / 3_600_000:.1f}h")
     print(f"content   {content['rows']:,} rows, {len(content['ids']):,} usable ids, "
           f"video_type {top(content['video_types'])}")
+    if content_shape.has("show_name"):
+        print(f"show_name {len(content['show_names']):,} distinct")
     print(f"events    {events['rows']:,} rows{' (sampled, the file is longer)' if events['truncated'] else ''}, "
           f"{events['sessions']:,} sessions, {events['open_sessions']:,} with no end event")
     print(f"span      {span}")
     print(f"platform  {top(events['counters']['platform'])}")
     print(f"country   {top(events['counters']['country'])}")
     print(f"event_type {top(events['counters']['event_type'])}")
+    if raw_shape.has("video_resolution"):
+        print(f"video_resolution {top(events['counters']['video_resolution'])}")
 
     cadence_check(events, problems, warnings)
     vocabulary_check(events, problems, warnings)

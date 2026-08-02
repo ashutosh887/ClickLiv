@@ -3,7 +3,12 @@ CREATE TABLE IF NOT EXISTS content_meta
     content_id UInt64,
     title      String,
     video_type LowCardinality(String),
-    category   LowCardinality(String)
+    category   LowCardinality(String),
+-- show_name is plain String, not LowCardinality: it is closer to title in cardinality
+-- than to category, and a LowCardinality dictionary stops paying its way well before
+-- one distinct value per show across a 33K-title catalogue. Empty for a content file
+-- that does not carry the column, so one schema serves both datasets.
+    show_name  String
 )
 ENGINE = MergeTree
 ORDER BY content_id;
@@ -13,7 +18,8 @@ CREATE DICTIONARY IF NOT EXISTS content_dict
     content_id UInt64,
     title      String,
     video_type String,
-    category   String
+    category   String,
+    show_name  String
 )
 PRIMARY KEY content_id
 SOURCE(CLICKHOUSE(
@@ -43,7 +49,8 @@ CREATE TABLE IF NOT EXISTS raw_events
     audio_language    LowCardinality(String),
     subtitle_language LowCardinality(String),
     player_version    LowCardinality(String),
-    session_start     DateTime64(3, 'UTC') CODEC(ZSTD(1))
+    session_start     DateTime64(3, 'UTC') CODEC(ZSTD(1)),
+    video_resolution  LowCardinality(String)
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(event_time)

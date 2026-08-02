@@ -8,8 +8,8 @@ import time
 from pathlib import Path
 
 from .ch import Result, parse_jsoncompact, split_statements
-from .load import (CONTENT_STRUCTURE, RAW_STRUCTURE, content_csv, content_insert,
-                   raw_csv, raw_insert)
+from .load import (CONTENT_OPTIONAL, CONTENT_TYPES, RAW_OPTIONAL, RAW_TYPES, content_csv,
+                   content_insert, raw_csv, raw_insert, shape)
 
 CREDENTIALS = {"CH_USER": "default", "CH_PASSWORD": ""}
 
@@ -53,9 +53,12 @@ def build(engine: ChdbEngine, render, sql_dir: Path) -> None:
     """Schema and pipeline SQL are the project's own files, byte for byte."""
     engine.script(render((sql_dir / "01_schema.sql").read_text()))
 
-    engine.command(content_insert(file_source(content_csv(), CONTENT_STRUCTURE)))
+    content_shape = shape(content_csv(), CONTENT_TYPES, CONTENT_OPTIONAL)
+    raw_shape = shape(raw_csv(), RAW_TYPES, RAW_OPTIONAL)
+    engine.command(content_insert(
+        file_source(content_csv(), content_shape.structure()), content_shape))
     engine.command("SYSTEM RELOAD DICTIONARY content_dict")
-    engine.command(raw_insert(file_source(raw_csv(), RAW_STRUCTURE)))
+    engine.command(raw_insert(file_source(raw_csv(), raw_shape.structure()), raw_shape))
 
     for name in ("02_sessionize.sql", "03_occupancy.sql", "04_deltas.sql"):
         engine.script(render((sql_dir / name).read_text()))
@@ -87,6 +90,15 @@ def run(server, render, sql_dir: Path, artifacts: Path) -> bool:
 
     print(f"chDB {version} built the whole pipeline in-process in "
           f"{time.time() - started:.1f}s, no server\n")
-    served = gates.fingerprint(server)
-    print(f"server is ClickHouse {server.scalar('SELECT version()')}")
+    try:
+        served = gates.fingerprint(server)
+        print(f"server is ClickHouse {server.scalar('SELECT version()')}")
+    except (ClickHouseError, OSError) as exc:
+        print(f"Gate D: SKIPPED. The in-process build succeeded, but the gate diffs it "
+              f"against a populated server and {server.config.host}:{server.config.port} "
+              f"did not answer: {exc}")
+        print("Start one with make up, build it with make all, then run this again.")
+        for name, value in embedded.items():
+            print(f"{name:<20}{value}")
+        return False
     return gates.compare(served, embedded, label="Gate D: chDB agrees with the server")

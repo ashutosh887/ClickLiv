@@ -1,5 +1,6 @@
--- content_id sits last among the dims in minute_occupancy's ORDER BY (D7), so a
--- content_id filter only gets "generic exclusion search" pruning off the base table.
+-- content_id sits deep in minute_occupancy's ORDER BY (D7), ninth of twelve terms since
+-- video_resolution and show_name joined the tail, so a content_id filter only gets
+-- "generic exclusion search" pruning off the base table.
 -- A projection reordered by (content_id, minute) makes content_id the leading key,
 -- which is a real prefix and gets binary search pruning instead.
 ALTER TABLE minute_occupancy MODIFY SETTING deduplicate_merge_projection_mode = 'rebuild';

@@ -1,6 +1,5 @@
-"""Generate an adversarial 'fresh day' in the sealed dataset's schema, carrying every
-case the tuning data never shows, and the same day again in every container and CSV
-quirk the organizers might ship. Deterministic: same bytes on every machine."""
+"""An adversarial fresh day in the sealed schema, plus the same day again in every
+container and CSV quirk the organizers might ship. Deterministic on every machine."""
 
 from __future__ import annotations
 
@@ -69,9 +68,8 @@ class Session:
                           self.subtitle, "2.0.1", self.start])
 
     def beats(self, rng: random.Random, first: int, last: int) -> int:
-        """A quarter of the rows repeat the millisecond before them, the way a quarter of
-        the tuning data's heartbeats do. Intervals take min and max per segment, so a
-        repeat must not move a single answer."""
+        """A quarter of the rows repeat the millisecond before them, as the tuning data
+        does. Intervals take min and max per segment, so a repeat moves no answer."""
         ts = first
         while ts <= last:
             self.add(ts, "VideoHeartbeat", rng.choice(BEATS))

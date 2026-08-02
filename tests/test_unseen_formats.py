@@ -1,6 +1,5 @@
-"""Pins what the sealed dataset is allowed to arrive as: any container, any delimiter,
-a byte order mark, CRLF, quoted commas and newlines, and a shouted or renamed header.
-Every check here runs without a server."""
+"""Pins what the sealed dataset may arrive as: any container or delimiter, a byte order
+mark, CRLF, quoted commas and newlines, a renamed header. No server needed."""
 
 from __future__ import annotations
 
@@ -129,7 +128,7 @@ class HeaderTests(Files):
         self.assertEqual(sh.delimiter, ";")
         for name in load.RAW_TYPES:
             self.assertIn(name, sh.header)
-        self.assertIn("`ignored_13` String", sh.structure(load.RAW_TYPES))
+        self.assertIn("`ignored_13` String", sh.structure())
 
     def test_quoted_commas_and_newlines_stay_inside_one_row(self):
         row = ROW.replace("opening", "x") + ""
@@ -169,6 +168,77 @@ class CadenceTests(unittest.TestCase):
         problems, warnings = self.measure(5_000, "40")
         self.assertEqual(problems, [])
         self.assertTrue(any("far above" in note for note in warnings))
+
+
+class OptionalColumnTests(Files):
+    """The sealed day adds video_resolution and show_name. The preserved sample has
+    neither, and both have to stay loadable from one schema."""
+
+    def test_the_new_columns_bind_when_the_file_carries_them(self):
+        sh = load.shape(self.write("a.csv", f"{HEADER},video_resolution\n{ROW},1080p\n"),
+                        load.RAW_TYPES, load.RAW_OPTIONAL)
+        self.assertTrue(sh.has("video_resolution"))
+        self.assertEqual(sh.value("video_resolution"), "video_resolution")
+        self.assertIn("`video_resolution` String", sh.structure())
+        self.assertEqual(sh.unknown(), [])
+
+    def test_a_file_without_them_still_loads_and_defaults_to_empty(self):
+        sh = load.shape(self.write("b.csv", f"{HEADER}\n{ROW}\n"),
+                        load.RAW_TYPES, load.RAW_OPTIONAL)
+        self.assertFalse(sh.has("video_resolution"))
+        self.assertEqual(sh.value("video_resolution"), "''")
+        self.assertIn("''", load.raw_insert("input('x')", sh))
+
+    def test_the_projection_names_the_column_only_when_it_is_there(self):
+        with_column = load.shape(
+            self.write("c.csv", f"{HEADER},video_resolution\n{ROW},4K\n"),
+            load.RAW_TYPES, load.RAW_OPTIONAL)
+        without = load.shape(self.write("d.csv", f"{HEADER}\n{ROW}\n"),
+                             load.RAW_TYPES, load.RAW_OPTIONAL)
+        self.assertEqual(load.raw_insert("input('x')", with_column).count("''"), 0)
+        self.assertEqual(load.raw_insert("input('x')", without).count("''"), 1)
+
+    def test_show_name_behaves_the_same_on_the_content_file(self):
+        carried = load.shape(
+            self.write("e.csv", "content_id,title,video_type,category,show_name\n"
+                                "1,opening night,live,sport,the show\n"),
+            load.CONTENT_TYPES, load.CONTENT_OPTIONAL)
+        absent = load.shape(self.write("f.csv", CONTENT),
+                            load.CONTENT_TYPES, load.CONTENT_OPTIONAL)
+        self.assertIn("show_name", load.content_insert("input('x')", carried))
+        self.assertIn("''", load.content_insert("input('x')", absent))
+
+    def test_a_renamed_new_column_still_binds_through_csv_rename(self):
+        os.environ["CSV_RENAME"] = "resolution=video_resolution"
+        sh = load.shape(self.write("g.csv", f"{HEADER},resolution\n{ROW},720p\n"),
+                        load.RAW_TYPES, load.RAW_OPTIONAL)
+        self.assertTrue(sh.has("video_resolution"))
+
+    def test_a_missing_required_column_still_stops_the_run(self):
+        header = HEADER.replace("event_timestamp", "ts_ms")
+        with self.assertRaises(SystemExit) as caught:
+            load.shape(self.write("h.csv", f"{header},video_resolution\n{ROW},4K\n"),
+                       load.RAW_TYPES, load.RAW_OPTIONAL)
+        self.assertIn("event_timestamp", str(caught.exception))
+
+    def test_a_genuinely_unknown_column_is_reported_not_silently_dropped(self):
+        sh = load.shape(self.write("i.csv", f"{HEADER},mystery_dimension\n{ROW},x\n"),
+                        load.RAW_TYPES, load.RAW_OPTIONAL)
+        self.assertEqual(sh.unknown(), ["mystery_dimension"])
+        warnings: list[str] = []
+        load.column_check(sh, sh, warnings)
+        self.assertTrue(any("mystery_dimension" in note for note in warnings))
+
+    def test_preflight_passes_on_a_day_that_carries_both_new_columns(self):
+        rows = "".join(
+            line.replace("\n", ",1080p\n")
+            for line in beats("s1", 1785693600000, 30, 40_000).splitlines(keepends=True))
+        os.environ["RAW_CSV"] = str(self.write(
+            "events.csv", f"{HEADER},video_resolution\n{ROW},4K\n" + rows))
+        os.environ["CONTENT_CSV"] = str(self.write(
+            "content.csv", "content_id,title,video_type,category,show_name\n"
+                           "1,opening night,live,sport,the show\n"))
+        self.assertTrue(load.preflight())
 
 
 class PreflightTests(Files):

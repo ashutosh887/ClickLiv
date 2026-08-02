@@ -28,7 +28,8 @@ def pick_open_session(ch: ClickHouse) -> dict | None:
 def dims_for(ch: ClickHouse, session_id: str) -> dict:
     return ch.query(f"""
         SELECT user_id, content_id, platform, app_version, country,
-               audio_language, subtitle_language, player_version, session_start
+               audio_language, subtitle_language, player_version, session_start,
+               video_resolution
         FROM raw_events
         WHERE video_session_id = '{escape(session_id)}'
         ORDER BY event_time DESC
@@ -42,13 +43,14 @@ def insert_heartbeat(ch: ClickHouse, session_id: str, dims: dict, event_ms: int)
         INSERT INTO raw_events
         (video_session_id, event_time, user_id, content_id, event_type, event,
          platform, app_version, country, audio_language, subtitle_language,
-         player_version, session_start)
+         player_version, session_start, video_resolution)
         VALUES
         ('{escape(session_id)}', fromUnixTimestamp64Milli({event_ms}), '{escape(dims['user_id'])}',
          {dims['content_id']}, 'VideoHeartbeat', 'network-activity',
          '{escape(dims['platform'])}', '{escape(dims['app_version'])}', '{escape(dims['country'])}',
          '{escape(dims['audio_language'])}', '{escape(dims['subtitle_language'])}',
-         '{escape(dims['player_version'])}', '{session_start}')
+         '{escape(dims['player_version'])}', '{session_start}',
+         '{escape(dims['video_resolution'])}')
     """)
 
 

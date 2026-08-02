@@ -22,8 +22,10 @@ CREATE TABLE ref_rollup
     subtitle_language LowCardinality(String),
     player_version    LowCardinality(String),
     content_id        UInt64,
+    video_resolution  LowCardinality(String),
     video_type        LowCardinality(String),
     category          LowCardinality(String),
+    show_name         String,
     sessions          UInt32
 )
 ENGINE = MergeTree

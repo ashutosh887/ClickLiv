@@ -9,7 +9,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from .load import CONTENT_TYPES, RAW_TYPES, open_text, shape
+from .load import (CONTENT_OPTIONAL, CONTENT_TYPES, RAW_OPTIONAL, RAW_TYPES, open_text,
+                   shape)
 
 PAUSE = frozenset({"pause", "speed-pause", "AdPause"})
 RESUME = frozenset({"resume", "speed-resume", "AdResume"})
@@ -23,8 +24,10 @@ VOCABULARY = {
 
 DIM_NAMES = (
     "platform", "app_version", "country", "audio_language",
-    "subtitle_language", "player_version", "content_id",
+    "subtitle_language", "player_version", "content_id", "video_resolution",
 )
+
+CONTENT_DIMS = ("video_type", "category", "show_name")
 
 
 MINUTE_MS = 60_000
@@ -89,10 +92,10 @@ class DimPool:
         return remap
 
 
-def rows_of(path: Path, types: dict[str, str]):
-    """Same header, delimiter and gzip handling the loader uses, so both paths read
-    the file the same way."""
-    sh = shape(path, types)
+def rows_of(path: Path, types: dict[str, str], optional: dict[str, str] | None = None):
+    """Same header, delimiter, gzip and optional-column handling the loader uses, so both
+    paths read the file the same way."""
+    sh = shape(path, types, optional)
     with open_text(path) as fh:
         reader = csv.reader(fh, delimiter=sh.delimiter)
         next(reader)
@@ -102,7 +105,7 @@ def rows_of(path: Path, types: dict[str, str]):
 
 def read_events(path: Path, pool: DimPool) -> dict[str, list[Event]]:
     sessions: dict[str, list[Event]] = {}
-    for row in rows_of(path, RAW_TYPES):
+    for row in rows_of(path, RAW_TYPES, RAW_OPTIONAL):
         dims = pool.intern((
             sys.intern(row["platform"]),
             sys.intern(row["app_version"]),
@@ -111,6 +114,7 @@ def read_events(path: Path, pool: DimPool) -> dict[str, list[Event]]:
             sys.intern(row["subtitle_language"]),
             sys.intern(row["player_version"]),
             int(row["content_id"]),
+            sys.intern(row.get("video_resolution", "")),
         ))
         event = Event(
             ts=int(row["event_timestamp"]),
@@ -219,11 +223,12 @@ def build(raw_path: Path, content_path: Path) -> dict:
     if not sessions:
         raise SystemExit(f"{raw_path} produced no events; nothing to build a reference from")
 
-    content: dict[int, tuple[str, str]] = {}
-    for row in rows_of(content_path, CONTENT_TYPES):
+    content: dict[int, tuple[str, str, str]] = {}
+    for row in rows_of(content_path, CONTENT_TYPES, CONTENT_OPTIONAL):
         cid = int(row["content_id"])
         if cid >= 0:
-            content[cid] = (row["video_type"], row["category"])
+            content[cid] = (row["video_type"], row["category"],
+                            row.get("show_name", ""))
 
     rollup: dict[tuple, int] = {}
     all_intervals: list[tuple[float, float]] = []
@@ -252,8 +257,7 @@ def build(raw_path: Path, content_path: Path) -> dict:
         for minute, dims in resolve(minutes, per_minute):
             session_minutes += 1
             values = pool.tuples[dims]
-            video_type, category = content.get(values[6], ("", ""))
-            key = (minute,) + values + (video_type, category)
+            key = (minute,) + values + content.get(values[6], ("", "", ""))
             rollup[key] = rollup.get(key, 0) + 1
 
     totals: dict[int, int] = {}
@@ -304,7 +308,7 @@ def write(result: dict, out_dir: Path) -> None:
 
     with (out_dir / "reference_rollup.csv").open("w", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["minute", *DIM_NAMES, "video_type", "category", "sessions"])
+        writer.writerow(["minute", *DIM_NAMES, *CONTENT_DIMS, "sessions"])
         for key in sorted(rollup):
             writer.writerow([*key, rollup[key]])
 

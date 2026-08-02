@@ -1,4 +1,5 @@
-"""Gate A. Four independent paths to the same number, diffed row for row."""
+"""Gate A. Five independent paths to the same numbers, diffed row for row: the python
+reference, SQL occupancy, SQL deltas, a half-open sweep and maxIntersections."""
 
 from __future__ import annotations
 
@@ -92,8 +93,8 @@ def run(ch: ClickHouse, artifacts: Path) -> bool:
                  f"{only_sql} only in SQL, {only_ref} only in reference")
 
     rollup_columns = ("minute, platform, app_version, country, audio_language, "
-                      "subtitle_language, player_version, content_id, video_type, "
-                      "category, sessions")
+                      "subtitle_language, player_version, content_id, video_resolution, "
+                      "video_type, category, show_name, sessions")
     only_sql, only_ref = diff_tables(
         ch,
         f"(SELECT {rollup_columns.replace('sessions', 'toUInt32(sum(sessions)) AS sessions')} "

@@ -54,7 +54,7 @@ class ShapeTests(unittest.TestCase):
         sh = shape(self.write("a.csv", f"{HEADER}\n{ROW}\n"), RAW_TYPES)
         self.assertEqual(sh.delimiter, ",")
         self.assertFalse(sh.gzipped)
-        self.assertIn("`country` String", sh.structure(RAW_TYPES))
+        self.assertIn("`country` String", sh.structure())
 
     def test_a_missing_column_fails_loudly_instead_of_defaulting(self):
         header = HEADER.replace(",country", "")
@@ -70,7 +70,7 @@ class ShapeTests(unittest.TestCase):
 
     def test_extra_columns_are_declared_and_ignored(self):
         sh = shape(self.write("d.csv", f"ingest_ts,{HEADER}\nx,{ROW}\n"), RAW_TYPES)
-        self.assertIn("`ignored_0` String", sh.structure(RAW_TYPES))
+        self.assertIn("`ignored_0` String", sh.structure())
         self.assertEqual(len(sh.header), 14)
 
     def test_a_semicolon_file_is_detected_and_the_setting_is_passed(self):
