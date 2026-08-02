@@ -85,15 +85,15 @@ and an explicit note in place of the `EXPLAIN ANALYZE` one.
 ## Threshold sensitivity
 
 The gap and grace thresholds are the two guessed numbers in the model, so they are swept
-rather than asserted. `make sweep` runs the grid.
+rather than asserted. `make sweep DB=clickliv_sample` runs the grid.
 
 | | grace 20s | grace 40s | grace 60s |
 |---|---|---|---|
-| **gap 60s** | 2,688 | 2,691 | 2,697 |
-| **gap 90s** | 2,689 | **2,692** | 2,697 |
-| **gap 120s** | 2,690 | 2,692 | 2,697 |
+| **gap 60s** | 2,705 | 2,709 | 2,715 |
+| **gap 90s** | 2,706 | **2,710** | 2,715 |
+| **gap 120s** | 2,707 | 2,710 | 2,715 |
 
-Peak concurrency moves 0.3% across the entire grid, and the peak minute never moves. The
+Peak concurrency moves 0.4% across the entire grid, and the peak minute never moves. The
 answer does not depend on the guess. That is a stronger result than defending a particular
 value, and it is the honest one.
 
