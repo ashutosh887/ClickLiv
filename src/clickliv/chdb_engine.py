@@ -50,8 +50,19 @@ def file_source(path: Path, structure: str) -> str:
 
 
 def build(engine: ChdbEngine, render, sql_dir: Path) -> None:
-    """Schema and pipeline SQL are the project's own files, byte for byte."""
-    engine.script(render((sql_dir / "01_schema.sql").read_text()))
+    """Schema and pipeline SQL are the project's own files, byte for byte. The content
+    dictionary's SOURCE(CLICKHOUSE(...)) self-references chDB's own in-process database,
+    which is always `engine.database`, not whatever CH_DATABASE points the real server
+    comparison at, so it is substituted separately for this one file."""
+    original_db = os.environ.get("CH_DATABASE")
+    os.environ["CH_DATABASE"] = engine.database
+    try:
+        engine.script(render((sql_dir / "01_schema.sql").read_text()))
+    finally:
+        if original_db is None:
+            os.environ.pop("CH_DATABASE", None)
+        else:
+            os.environ["CH_DATABASE"] = original_db
 
     content_shape = shape(content_csv(), CONTENT_TYPES, CONTENT_OPTIONAL)
     raw_shape = shape(raw_csv(), RAW_TYPES, RAW_OPTIONAL)

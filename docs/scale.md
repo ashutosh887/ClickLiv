@@ -10,7 +10,7 @@ Sessionization never lets a session cross a shard boundary, so splitting
 `active_intervals` across 8 independent chDB instances by
 `cityHash64(video_session_id) % 8`, computing each shard's per-minute session count
 alone, and summing the 8 results reproduces the live server's `minute_occupancy` peak
-and its full 3,649-minute series exactly. No session is ever double-counted or missed,
+and its full 4,145-minute series exactly. No session is ever double-counted or missed,
 by construction, which is why this fans out on any number of workers with no
 coordination between them.
 
@@ -146,20 +146,20 @@ the ranking on new data is one `estimateCompressionRatio` query per column.
 
 The data dictionary says user-level concurrency can be derived from `user_id`. The
 serving layer stays session-level by default; `make userlevel` measures the
-alternative instead of asserting it, writing `evidence/user_level.txt`. At the peak
-minute, 2,692 concurrent sessions resolve to 2,626 concurrent users, exact and
-HyperLogLog agreeing to 0.00% error at this cardinality. The 66-session gap is a second
-device on an account already counted, not noise: 66 of the 2,692 sessions live at that
-minute belong to an account that already has another session live at that same minute,
-which is user-level concurrency running 2.5% below session-level at the peak.
+alternative instead of asserting it, writing `evidence/user_level.txt`. At the sealed
+day's peak minute, 22,175 concurrent sessions resolve to 21,299 concurrent users, exact
+and HyperLogLog agreeing to 0.00% error at this cardinality. The 876-session gap is a
+second device on an account already counted, not noise: 876 of the 22,175 sessions live
+at that minute belong to an account that already has another session live at that same
+minute, which is user-level concurrency running 4.1% below session-level at the peak.
 
-Two other counts in that evidence file measure the whole 11.8-day extract rather than
-the peak minute, and are easy to misread as the explanation for the 66. Over the full
-window 784 users opened more than one session at some point, and 120 sessions carry more
+Two other counts in that evidence file measure the whole day rather than the peak
+minute, and are easy to misread as the explanation for the 876. Over the full window
+16,327 users opened more than one session at some point, and 303 sessions carry more
 than one `user_id`. Neither is a concurrency figure. The peak-minute overlap is bounded
-by the 66 above, and it has to be: if 784 accounts were each running a second session in
-that one minute the gap would be at least 784, not 66. The 784 is the population the 66
-is drawn from, nothing more.
+by the 876 above, and it has to be: if 16,327 accounts were each running a second
+session in that one minute the gap would be at least 16,327, not 876. The 16,327 is the
+population the 876 is drawn from, nothing more.
 
 The peak-minute reading also confirms `uniq` /
 `uniqState` / `uniqMerge` reproduces `uniqExact` exactly here, so it is a bounded,
@@ -171,18 +171,21 @@ design choice is sound and stops there.
 
 `uniqTheta` and `uniqCombined64` were the obvious things to reach for and neither earned
 its place, which is worth stating with the measurement rather than leaving as a gap.
-Counted over `raw_events`, memory from `system.query_log.memory_usage`:
+Counted over the sealed day's `raw_events`, memory read through
+`clusterAllReplicas(default, system.query_log)`:
 
 | function | distinct users | error | memory |
 |---|---|---|---|
-| `uniqExact` | 9,618 | 0.000% | 60.0 MB |
-| `uniq` | 9,618 | 0.000% | 69.3 MB |
-| `uniqCombined64` | 9,628 | 0.104% | 62.4 MB |
-| `uniqTheta` | 9,484 | 1.393% | 46.4 MB |
+| `uniqExact` | 82,958 | 0.000% | 52.2 MB |
+| `uniq` | 82,934 | 0.029% | 52.2 MB |
+| `uniqCombined64` | 83,132 | 0.210% | 52.2 MB |
+| `uniqTheta` | 83,800 | 1.015% | 52.2 MB |
 
-At 9,618 distinct users the hash set is not the cost, the scan is, so an approximate
-estimator buys nothing and spends accuracy on a headline number. The crossover is real
-but far away, and it was measured rather than guessed:
+At 82,958 distinct users the four converge on the same memory, because the scan of
+7,000,000 rows dominates, not the estimator's hash state, so the hash set is not the
+cost, the scan is. An approximate estimator buys nothing here and spends accuracy on a
+headline number. The crossover is real but far away, and it was measured rather than
+guessed:
 
 | distinct values | `uniqExact` memory | `uniqCombined64` memory |
 |---|---|---|

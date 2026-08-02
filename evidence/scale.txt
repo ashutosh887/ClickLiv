@@ -2,18 +2,18 @@ O7 scale demonstration
 
 Proof 1: sharding is exact, not approximate (D25)
 8 shards by cityHash64(video_session_id) % 8
-rows per shard: [4021, 3831, 4020, 3917, 4163, 4292, 3896, 4024]
-merged peak 2,692, real minute_occupancy peak 2,692
-per-minute series across 3649 minutes: matches exactly
+rows per shard: [22174, 22074, 21918, 21897, 21616, 22654, 21530, 23509]
+merged peak 22,175, real minute_occupancy peak 22,175
+per-minute series across 4145 minutes: matches exactly
 
 Why this proves correctness rather than claiming it: sessionization never splits a session across shards, so a shard's local per-minute session count is already a correct component of the global sum, no double counting and nothing missed is possible by construction.
 
 Proof 2: serving layer read cost scales with the rollup, not raw events
 Simplification: the rollup here regroups by (video_session_id, minute) from raw event timestamps, skipping the window-function sessionizer so 100x finishes in minutes. This is honest about what changed: concurrency numbers from this proxy do not match the real pipeline, but the row-count scaling argument, read_rows against table cardinality, is unaffected by that.
 
-Honest caveat on the growth numbers below: scale is built by exact duplication (same sessions, K copies with shifted ids and time), so raw_rows and serving_rows both scale by K here, that is a property of duplication, not of a rollup. What duplication cannot fake is the collapse ratio at a fixed scale: naive reads 7.4x more rows than the rollup at 1x and still 7.4x more at 100x, so the compression from raw event grain to session-minute grain is structural and does not erode as the table grows. Under organic growth, where sessions gain more events rather than sessions being cloned wholesale, serving_rows would grow slower than raw_rows and this ratio would widen, not stay flat.
+Honest caveat on the growth numbers below: scale is built by exact duplication (same sessions, K copies with shifted ids and time), so raw_rows and serving_rows both scale by K here, that is a property of duplication, not of a rollup. What duplication cannot fake is the collapse ratio at a fixed scale: naive reads 10.3x more rows than the rollup at 1x and still 10.3x more at 100x, so the compression from raw event grain to session-minute grain is structural and does not erode as the table grows. Under organic growth, where sessions gain more events rather than sessions being cloned wholesale, serving_rows would grow slower than raw_rows and this ratio would widen, not stay flat.
 
  scale    raw_rows  serving_rows  naive_read_rows  rollup_read_rows    ratio
-    1x     905,558       121,954          905,558           121,954      7.4
-   10x   9,055,580     1,219,481        9,055,580         1,219,481      7.4
-  100x  90,555,800    12,194,810       90,555,800        12,194,810      7.4
+    1x   7,000,000       678,060        7,000,000           678,060     10.3
+   10x  70,000,000     6,810,957       70,000,000         6,810,957     10.3
+  100x 700,000,000    68,073,822      700,000,000        68,073,822     10.3

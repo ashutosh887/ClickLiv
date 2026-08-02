@@ -32,8 +32,8 @@ Gate A: PASS  (12/12 checks)
 ## Gate B, idempotent rebuild
 
 `make gate-b` rebuilds the pipeline twice and asserts the serving tables are
-byte-identical across the two runs. Against ClickHouse Cloud it produces the same hashes
-as the local Docker target, `minute_deltas` hash `2d7c0e268430f7ee`.
+byte-identical across the two runs. Run against `clickliv_sample` on ClickHouse Cloud,
+`minute_deltas` hash `adcf745bdd90dde1`.
 
 ## Gate C, the held-out single-day dry run
 
@@ -48,24 +48,27 @@ it rehearses.
 `make chdb` needs no server at all. It builds the entire pipeline inside the Python process
 with chDB and checks it against the served tables:
 
-Against the ClickHouse Cloud service:
+Against `clickliv_sample` on the ClickHouse Cloud service, `CH_DATABASE=clickliv_sample`:
 
 ```
-chDB 26.5.1.1 built the whole pipeline in-process in 1.8s, no server
+chDB 26.5.1.1 built the whole pipeline in-process in 2.1s, no server
 
 server is ClickHouse 26.4.1.2029
 
-PASS  minute_occupancy     96,818 rows  hash 8231330d0e0603ee
-PASS  minute_deltas        33,748 rows  hash 2d7c0e268430f7ee
-PASS  active_intervals     32,164 rows  hash 1f6726b4cec03404
+PASS  minute_occupancy     98,034 rows  hash dc4550294e18a26a
+PASS  minute_deltas        35,849 rows  hash adcf745bdd90dde1
+PASS  active_intervals     32,562 rows  hash a366a631c835953f
 
 Gate D: PASS  chDB agrees with the server
 ```
 
-Point `.env` at local Docker instead and the same command prints `server is ClickHouse
-26.7.1.1315` above the same three hashes. Three ClickHouse versions run this project,
-and each one is stated with the environment it came from: **26.4.1.2029** on the Cloud
-service, **26.7.1.1315** in local Docker, **26.5.1.1** for embedded chDB. The hashes are
+chDB builds fresh from the local sample CSV every run, so this gate needs a server
+holding the same data to diff against; run bare against `clickliv`, which now holds the
+sealed day, and the row counts intentionally disagree. Point `.env` at local Docker
+instead and the same command prints `server is ClickHouse 26.7.1.1315` above the same
+three hashes. Three ClickHouse versions run this project, and each one is stated with
+the environment it came from: **26.4.1.2029** on the Cloud service, **26.7.1.1315** in
+local Docker, **26.5.1.1** for embedded chDB. The hashes are
 `groupBitXor` over `cityHash64`, which is order independent, so they pin the contents of
 the serving tables and nothing about how those rows happen to be laid out on disk.
 
