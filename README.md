@@ -24,29 +24,64 @@ make up && make all
 `make data` fetches the two source CSVs. They are not in the repository, because `data/`
 is gitignored, so a clone without this step fails at load.
 
-`make up` starts ClickHouse in Docker, or point `.env` at ClickHouse Cloud instead. Note
-that the Cloud service this project runs against is 26.4, so `EXPLAIN ANALYZE`, which
-needs 26.7, is unavailable there and the code records that rather than failing.
-`make all` runs CSV to Gate A in about eight seconds and prints twelve cross-path checks.
-`make chdb` reproduces the same numbers in-process with chDB, no server and no Docker at
-all.
+`make up` starts ClickHouse in Docker, or point `.env` at ClickHouse Cloud instead. `make
+all` runs CSV to Gate A in about 11 seconds on local Docker and prints twelve cross-path
+checks. `make chdb` reproduces the same numbers in-process with chDB, no server and no
+Docker at all.
+
+**`make claims` re-reads every published figure straight off the live service** and names
+any document still stating a superseded one. This README is checkable in one command
+rather than trusted, and the check runs against the database, not against a fixture.
+
+Running now: the [dashboard](https://clickliv.vercel.app), the
+[conversational surface](https://librechat.15-252-63-157.sslip.io), the
+[LLM traces](https://langfuse.15-252-63-157.sslip.io) and the
+[pipeline traces](https://clickstack.15-252-63-157.sslip.io). Details in
+[Live demo](#live-demo).
+
+### Where each judging criterion is answered
+
+| Criterion | The short answer | Section |
+|---|---|---|
+| Correctness against the private key | Five independent implementations of the same question, diffed by four gates. Three ClickHouse runtimes and a Python reference that reads the CSV and owes ClickHouse nothing agree hash for hash. | [Correctness](#correctness-five-paths-then-diff-them) |
+| Query performance, and what the queries read | The served query reads 96,818 rollup rows rather than 905,558 events, and read cost is flat in the number of filters: going from zero filters to eight costs 1,350 extra rows. Server-side p99 is 58 ms against a self-imposed 100 ms. | [Serving](#serving-one-parameterized-view-behind-a-budgeted-role), [Scale](#scale-and-what-happens-at-100x) |
+| Update handling | A materialized view extends still-open sessions on every insert with no rebuild. Proven by reading the live state and then running the full batch sessionizer from scratch: they agree to the millisecond. | [Update handling](#update-handling-incrementally-rather-than-by-rebuild) |
+| Design quality and the trade-offs | Every threshold derives from a measurement of this data rather than from the data dictionary, and the two thresholds that remain guesses are swept across a grid rather than defended. | [The model](#the-model-and-the-measurement-that-forced-each-decision) |
+| The unseen day | One command, preflighted before anything is dropped, snapshotted so a failure is seconds from rollback, rehearsed against adversarial fixtures and against a held-out real day. | [Unseen day](#built-for-the-unseen-day-not-the-data-we-tuned-on) |
+| Behaviour at 100x | Sharding is exact by construction. Eight independent shards computed alone and summed reproduce the server's peak of 2,692 and its full 3,649-minute series, so this fans out with no coordination. | [Scale](#scale-and-what-happens-at-100x) |
+| At least one OSS pillar, meaningfully | All three, plus the ClickHouse MCP server. Langfuse is a second ClickHouse workload, not a name-drop: its traces live in this project's own Cloud service. | [OSS pillars](#the-oss-pillars) |
 
 ---
 
 ## Results
 
-Both datasets are published here, same metric names, same order, same units. The tuning
-dataset is the one shipped with the problem statement. The final column is filled from a
-single `make replay` against the sealed dataset.
+Both datasets are published here, same metric names, same order, same units. The sample
+dataset is the extract shipped with the problem statement, which this project was tuned
+against. The final dataset is the sealed SonyLIV drop and is the source of truth once it
+lands.
 
-<!-- FINAL DATA PASTES HERE. Replace every "pending" in the two tables below and nowhere
-     else. Source: make replay, then answers/benchmark_answers.csv, submission/manifest.json
-     and marts.v_overcount. Every other number in this README is prose about the method,
-     not about a particular dataset. -->
+The two live side by side rather than one replacing the other. The final data builds into
+the `clickliv` database behind the `marts` schema, which is what every live surface reads,
+and the sample is preserved as `clickliv_sample` behind `marts_clickliv_sample`, same
+views, same parameters, same restricted role. Switching dataset is a change of schema
+name and nothing else. See [docs/datasets.md](docs/datasets.md).
+
+**Every cell reading `pending` is filled from one run of `make unseen RAW=<events.csv>
+CONTENT=<content.csv>`**, so the final column is a paste rather than a re-derivation under
+time pressure. It writes `unseen/answers/comparison.md`, which already puts the sample and
+sealed values side by side for the peak, the peak minute, the instantaneous peak, the
+average over active minutes, the session, interval, occupancy and minute counts, and each
+of the eight benchmark slices. The overcount pair, the naive peak and the average over
+open minutes come from `marts.v_overcount`; the load counts, window and gate hashes from
+`unseen/submission/manifest.json`; the latency percentiles from
+`unseen/evidence/serving_slo.txt`. `make claims` then re-reads all of them against the
+live service and names anything still stating a superseded figure, so the swap is checked
+rather than eyeballed. Nothing else in this README is a per-dataset number; everything
+else is prose about the method.
 
 ### Concurrency
 
-| Measure | Tuning dataset | Final dataset |
+| Measure | Sample dataset | Final dataset |
 |---|---|---|
 | Peak concurrency, foreground-only, unfiltered | **2,692** | pending |
 | Minute of peak, UTC | 2026-07-26 10:56:00 | pending |
@@ -75,7 +110,7 @@ labelled everywhere they appear rather than silently picked.
 
 ### Dataset shape and pipeline output
 
-| Measure | Tuning dataset | Final dataset |
+| Measure | Sample dataset | Final dataset |
 |---|---|---|
 | Raw events loaded | 905,558 | pending |
 | Content rows loaded | 33,463 | pending |
@@ -91,13 +126,109 @@ labelled everywhere they appear rather than silently picked.
 | Gates A, B, C, D | 12/12, byte-identical, PASS, hashes match | pending |
 
 Latency is `query_duration_ms` read from `system.query_log` by `query_id`, never client
-wall clock. The target is ours and self-imposed at p99 under 100 ms, because no SLA was
-ever published upstream. It moves several milliseconds run to run, so the percentiles live
-in `evidence/serving_slo.txt` and the per-sample rows in `evidence/serving_slo.csv`,
+wall clock. The 40 samples are the 8 benchmark queries run 5 times each. The target is
+ours and self-imposed at p99 under 100 ms, because no SLA was ever published upstream. It
+moves several milliseconds run to run, so the percentiles live in
+`evidence/serving_slo.txt` and the per-sample rows in `evidence/serving_slo.csv`,
 recomputable rather than believed.
 
 Every number above is produced by a query this repository ran, tagged with a `query_id`
 and traceable to `system.query_log`. See [docs/evidence.md](docs/evidence.md).
+
+---
+
+## The concurrency curve, and the SQL behind it
+
+The curve is live in the product at **[clickliv.vercel.app](https://clickliv.vercel.app)**:
+foreground-only concurrency over the whole window, the naive open-session curve drawn
+behind it for contrast, and the ramp into the peak minute visible at minute grain. The
+filters redraw it.
+
+This is the query the dashboard issues to draw it, verbatim. It calls a parameterized view
+as a table function, so every filter arrives as a bound parameter and no SQL is ever
+concatenated from user input:
+
+```sql
+SELECT bucket_minute,
+       toDateTime(bucket_minute * 60, 'UTC') AS bucket_start,
+       peak_concurrency,
+       round(average_concurrency, 2) AS average_concurrency,
+       minutes_in_bucket
+FROM marts.v_concurrency(
+    grain_minutes = {grain:UInt32}, country = '', platform = {platform:String},
+    video_type = {video_type:String}, content_id = 0,
+    minute_from = 0, minute_to = 4294967295)
+ORDER BY bucket_minute
+```
+
+It reads exactly one table, the `minute_occupancy` rollup, and never touches `raw_events`.
+That table and the statement that fills it are the whole concurrency model at the serving
+grain:
+
+```sql
+CREATE TABLE minute_occupancy
+(
+    country LowCardinality(String), platform LowCardinality(String),
+    video_type LowCardinality(String), category LowCardinality(String),
+    app_version LowCardinality(String), player_version LowCardinality(String),
+    audio_language LowCardinality(String), subtitle_language LowCardinality(String),
+    content_id UInt64 CODEC(ZSTD(1)),
+    minute UInt32 CODEC(DoubleDelta, ZSTD(1)),
+    sessions UInt32
+)
+ENGINE = SummingMergeTree(sessions)
+PARTITION BY toYYYYMMDD(toDateTime(minute * 60, 'UTC'))
+ORDER BY (minute, country, platform, video_type, category, app_version,
+          player_version, audio_language, subtitle_language, content_id);
+
+INSERT INTO minute_occupancy
+SELECT country, platform, video_type, category, app_version, player_version,
+       audio_language, subtitle_language, content_id, minute,
+       toUInt32(count()) AS sessions
+FROM session_minutes
+GROUP BY country, platform, video_type, category, app_version, player_version,
+         audio_language, subtitle_language, content_id, minute;
+```
+
+`minute` leads the ordering key because it is the only predicate the index can use: every
+served query carries a minute range, while the dimension filters reach the table wrapped in
+`lower()` or as `col = col`, neither of which `KeyCondition` can turn into a range. Every
+dimension still appears in the key, so the `SummingMergeTree` grouping is unchanged and no
+answer moves.
+
+`session_minutes` underneath it holds one row per active session-minute, produced by
+`sql/02_sessionize.sql` and `sql/03_occupancy.sql`. What counts as active, and the
+measurement that forced each part of that rule, is
+[the model](#the-model-and-the-measurement-that-forced-each-decision).
+
+### Which dataset column backs each filter
+
+Every filter is a column the dataset actually ships, carried through to the rollup and
+exposed as a parameter of the same view the curve reads. Dimensions from the content file
+reach a session by `content_id` through a dictionary rather than a join.
+
+| Filter | Dataset column | Source file | Carried as |
+|---|---|---|---|
+| Platform | `platform` | raw events | `minute_occupancy.platform` |
+| Country | `country` | raw events | `minute_occupancy.country` |
+| App version | `app_version` | raw events | `minute_occupancy.app_version` |
+| Player version | `player_version` | raw events | `minute_occupancy.player_version` |
+| Audio language | `audio_language` | raw events | `minute_occupancy.audio_language` |
+| Subtitle language | `subtitle_language` | raw events | `minute_occupancy.subtitle_language` |
+| Video resolution | `video_resolution` | raw events, sealed dataset only | `minute_occupancy.video_resolution` |
+| Title or asset | `title`, resolved to `content_id` | content | `minute_occupancy.content_id` |
+| Show | `show_name` | content, sealed dataset only | `minute_occupancy.show_name` |
+| Video type | `video_type` | content | `minute_occupancy.video_type` |
+| Category | `category` | content | `minute_occupancy.category` |
+| Time range and grain | `event_timestamp` | raw events | `minute_occupancy.minute`, plus `grain_minutes` |
+
+`video_resolution` and `show_name` arrive with the sealed dataset, which is why they are
+marked. This table is the only place the README enumerates dimensions; everywhere else
+refers back to it, so a schema change is an edit here and nowhere else.
+
+Filters apply to the curve and to every other view built on `marts`, because they are the
+same parameters on the same view. `list_dimensions` in the chat surface returns the
+accepted values for each one, read from the data rather than hardcoded.
 
 ---
 
@@ -151,10 +282,11 @@ flowchart TB
 
 **ClickHouse** does the work the problem is actually made of. Sessionization is a window
 function over 905,558 ordered events, concurrency is a merge of intervals into a minute
-grain, and serving is a filtered aggregate over a rollup. Those are columnar operations,
-and the whole pipeline from CSV to answers finishes in about eight seconds on the tuning
-data. Nothing runs outside the database except the independent Python reference, which
-exists precisely so that it can disagree.
+grain, and serving is a filtered aggregate over a rollup. Those are columnar operations, and the
+whole pipeline from CSV through Gate A finishes in about 11 seconds on local Docker, 52
+seconds end to end against Cloud including the submission bundle. Nothing runs outside the
+database except the independent Python reference, which exists precisely so that it can
+disagree.
 
 **MCP** is the boundary that makes an LLM safe to point at a warehouse. Five pre-vetted
 parameterized tools, filter values checked against an allowlist read from the data itself,
@@ -257,8 +389,10 @@ content loaded after events would never be picked up. A dictionary makes the dep
 explicit, and the loader asserts content loads first rather than assuming it.
 
 **Partitioning by day is data management, not performance.** Unnecessary partitioning is
-measured at 46x slower elsewhere, so the justification has to be the right one: the
-partition is the atomic promotion unit, it bounds part counts, and it gives TTL a target.
+measured at 46x slower elsewhere, so the justification has to be the right one: a day is
+the unit this data arrives and is replaced in, which makes the partition the atomic
+promotion unit and the thing Gate C drops and rebuilds in isolation. Retention is not one
+of the reasons, because no TTL is defined anywhere in `sql/`.
 
 **Serving reads always aggregate.** `SummingMergeTree` merges are asynchronous, so every
 read groups explicitly instead of trusting that a merge has happened. `FINAL` never appears
@@ -331,12 +465,15 @@ answers any (dimension filter, time range, grain) combination through one parame
 view called as a table function. Filtering happens before aggregation and aggregation is
 always to minute, so the order of operations holds no matter which dimensions are supplied.
 
-`marts` is the only granted surface. Its consumers hold a role scoped to `SELECT ON
-marts.*` and nothing on the tables underneath, enforced by `SQL SECURITY DEFINER` so the
-invoker's own grants are never checked against the raw tables. This is not a detail: a
-plain view over `minute_occupancy` returned an access error naming the underlying table,
-which would have made "marts is the only granted surface" false in the first way a
-guardrails reviewer checks.
+`marts` is the only granted surface. Every remote consumer, the Vercel dashboard and the
+MCP server with LibreChat behind it, holds a role scoped to `SELECT ON marts.*` and nothing
+on the tables underneath, enforced by `SQL SECURITY DEFINER` so the invoker's own grants
+are never checked against the raw tables. This is not a detail: a plain view over
+`minute_occupancy` returned an access error naming the underlying table, which would have
+made "marts is the only granted surface" false in the first way a guardrails reviewer
+checks. One local tool sits outside that rule on purpose. `make ui` connects with the
+`.env` admin credential and reads `minute_occupancy` directly for its platform list; it is
+a developer chart on localhost, not a demo surface.
 
 The settings profile carries `readonly = 1 CONST`, so a consumer cannot raise its own
 ceiling. A raw scan is not merely slow, it does not start. **Verified by refusal against
@@ -380,7 +517,7 @@ materialized view is not a permanent tax on every other command.
 
 ---
 
-## Scale, answered with measurements
+## Scale, and what happens at 100x
 
 **Sharding is exact by construction.** `make scale`. Sessionization never lets a session
 cross a shard boundary, so splitting across 8 independent chDB instances by
@@ -430,13 +567,21 @@ make unseen    RAW=<events.csv> CONTENT=<content.csv>   # answers, latencies, ev
 make rollback                                            # put the previous demo back
 ```
 
+`make unseen` is the graded path and the only command that should touch the sealed data.
+`make replay` runs the same stages but takes no CSV arguments and writes over the
+committed sample-data results, so it is the rehearsal command, not the drop command.
+
 `make preflight` validates a fresh pair of files while the tables the demo is serving are
 still up, so everything wrong with them is found before anything is dropped. `make unseen`
-writes into a separate output tree, so the tuning-data results are never overwritten, and
-it prints the sealed run's numbers beside the tuning run's. `make unseen` takes an optional
-`CSV_RENAME=theirs=ours,...` mapping and an optional `DB=` so the sealed run can land in
-its own database. A snapshot moves the serving tables aside rather than dropping them, so a
-run that dies midway is one `make rollback` away from the demo it was replacing.
+builds into whatever `CH_DATABASE` names, which is `clickliv`, because every live surface
+reads that database and building the graded data anywhere else would leave the demo
+serving the sample. Its outputs land under `unseen/` instead, so the committed sample-data
+run in `answers/`, `evidence/` and `submission/` is never overwritten, and it writes
+`unseen/answers/comparison.md` with the sealed numbers beside the sample ones in the order
+the results tables use. It takes an optional `CSV_RENAME=theirs=ours,...` mapping for a
+renamed column. A snapshot moves the serving tables aside rather than dropping them, so a
+run that dies midway is one `make rollback` away from the demo it was replacing, measured
+at 7.8 seconds against Cloud.
 
 Hardening, each item verified against an adversarial fixture rather than reasoned about:
 
@@ -447,7 +592,7 @@ Hardening, each item verified against an adversarial fixture rather than reasone
   actually present next to the ones expected, so a renamed event is diagnosable from the
   error alone. Every answer coming back zero with nothing complaining is the worst failure
   mode available, so it is a hard stop.
-- **Tuning-day row counts are printed, not asserted.** An earlier version failed the run on
+- **Sample-data row counts are printed, not asserted.** An earlier version failed the run on
   them, which means the graded day would have aborted before doing any work. Only the real
   invariants fail the run now: zero join orphans and a non-empty load.
 - Gzip, alternate delimiters, extra columns and a column rename mapping are all handled.
@@ -463,11 +608,13 @@ The runbook is [docs/unseen-day.md](docs/unseen-day.md).
 
 ## Every command
 
-`make replay` is the whole graded run in one command, CSV to submission bundle, 52 seconds
-against ClickHouse Cloud. Everything it composes is also a target on its own.
+`make replay` is the whole run in one command, CSV to submission bundle, 52 seconds
+against ClickHouse Cloud. `make unseen` is the same thing for the sealed drop. Everything
+either one composes is also a target on its own.
 
 | Target | What it does |
 |---|---|
+| `make data` | Fetch the two source CSVs, which `data/` being gitignored keeps out of the clone |
 | `make up` / `make down` / `make logs` | ClickHouse 26.7 in Docker |
 | `make ping` / `make schema` / `make load` / `make reconcile` | Connect, create the schema, load both CSVs, reconcile row counts |
 | `make sessionize` / `make occupancy` / `make deltas` | The three build stages |
@@ -505,8 +652,9 @@ against ClickHouse Cloud. Everything it composes is also a target on its own.
 
 ## The OSS pillars
 
-The rules require one of ClickStack, Langfuse or LibreChat, integrated meaningfully. All
-three are, and none of them is a name-drop.
+The rules require one of ClickStack, Langfuse or LibreChat, integrated meaningfully, and
+say that superficial inclusion will not count. All three are here, plus the ClickHouse MCP
+server, and each one carries load that would be missed if it were removed.
 
 **ClickStack** traces the pipeline itself, 189 spans in a single `make replay`. The
 exporter is OTLP over JSON on the standard library, so this pillar added zero
@@ -514,14 +662,20 @@ dependencies, and leaving the endpoint unset makes tracing a byte-identical no-o
 in both directions against Gates A, B and D. One exporter feeds ClickStack and Langfuse
 from the same spans.
 
-**Langfuse** traces the LLM and MCP calls, 96 traces and 2,033 observations live, and its
-own storage is entirely ClickHouse products: traces in this project's ClickHouse Cloud
-service on SharedMergeTree, transactional state in ClickHouse managed Postgres.
+**Langfuse** traces the LLM and MCP calls, and its own storage is entirely ClickHouse
+products: traces in this project's ClickHouse Cloud service on SharedMergeTree,
+transactional state in ClickHouse managed Postgres. The trace count is deliberately not
+published here, because it climbs every time anyone opens the chat surface and a figure
+that is wrong within the hour is worse than no figure. Read it off
+`langfuse.traces` in the same service, or off the Langfuse UI.
 
 **LibreChat** asks the question in plain language through the guardrailed MCP server. Five
 tools: `concurrency_peak`, `concurrency_series`, `top_slices`, `overcount` and
-`list_dimensions`. Filter values are validated against real dimension values read from the
-data, so an invalid filter raises a tool error rather than silently returning zero. Each
+`list_dimensions`. They filter on every dimension in the
+[filter table](#which-dataset-column-backs-each-filter), plus a title or a `content_id`,
+so nothing published in this README is out of reach from chat. Filter
+values are validated against real dimension values read from the data, so an invalid
+filter raises a tool error rather than silently returning zero. Each
 answer reports the rows it read, taken from the response statistics block and verified byte
 identical to `system.query_log.read_rows` for the same `query_id`. A labelled escape hatch
 to the official read-only ClickHouse MCP server exists for schema exploration, and its
@@ -536,17 +690,17 @@ as the restricted role reading 96,818 rows each.
 
 ## Live demo
 
-- **[clickliv.vercel.app](https://clickliv.vercel.app)** is the concurrency chart, reading
-  `marts.v_concurrency` through a serverless proxy as the same restricted budgeted role
-  every other consumer uses. No admin credential exists in that environment, and the API
-  response says so in a `served_by` field.
-- **[librechat.15-252-63-157.sslip.io](https://librechat.15-252-63-157.sslip.io)** is the
+- **[clickliv.vercel.app](https://clickliv.vercel.app)** is the concurrency curve and its
+  filters, reading `marts.v_concurrency` through a serverless proxy as the same restricted
+  budgeted role every other consumer uses. No admin credential exists in that environment,
+  and the API response says so in a `served_by` field.
+- **[librechat.15-252-63-157.sslip.io](https://librechat.15-252-63-157.sslip.io)**, the
   conversational surface.
-- **[langfuse.15-252-63-157.sslip.io](https://langfuse.15-252-63-157.sslip.io)** is the LLM
+- **[langfuse.15-252-63-157.sslip.io](https://langfuse.15-252-63-157.sslip.io)**, the LLM
   observability pillar.
-- **[clickstack.15-252-63-157.sslip.io](https://clickstack.15-252-63-157.sslip.io)** traces
-  the pipeline. The starred **ClickLiv pipeline telemetry** dashboard is the panel worth
-  opening.
+- **[clickstack.15-252-63-157.sslip.io](https://clickstack.15-252-63-157.sslip.io)**, the
+  pipeline traces. The starred **ClickLiv pipeline telemetry** dashboard is the panel
+  worth opening.
 
 The data lives in a ClickHouse Cloud service in `ap-south-1` with 2 replicas, next to a
 ClickHouse managed Postgres service in the same region. The three self-hosted surfaces run
@@ -567,10 +721,10 @@ leaving a silent gap. Local Docker is 26.7, so the full plan is available there.
 **`ADD PROJECTION` on a `SummingMergeTree` needs `deduplicate_merge_projection_mode =
 'rebuild'`** set first, or it throws `SUPPORT_IS_DISABLED`. Classic `MergeTree` does not.
 
-**Every one of the 10,866 tuning sessions is closed.** The sealed set is promised to contain
-open sessions, so open-session handling cannot be validated against the tuning data. This
-is the largest blind spot in the submission. It is mitigated by adversarial fixtures and by
-Gate C, not by the tuning data.
+**Every one of the 10,866 sample sessions is closed.** The sealed set is promised to
+contain open sessions, so open-session handling cannot be validated against the sample
+data. This is the largest blind spot in the submission. It is mitigated by adversarial
+fixtures and by Gate C, not by the sample data.
 
 **The projection's absolute savings are small on this volume**, 6 granules against 17. The
 honest framing is architectural: the mechanism is proven to work and proven to be chosen
@@ -580,18 +734,19 @@ automatically, not that it saves meaningful wall clock on 905K rows.
 instantaneous**, and the private ground truth uses one of them. Both are computed and both
 are reported per slice. Occupancy leads.
 
-**The window spans 11.82 days but only 7 of them carry data**, and 94.4% of session-minutes
-fall on 2026-07-26. The peak is real; the span is not a claim about sustained load.
+**In the sample data the window spans 11.82 days but only 7 of them carry data**, and 94.4%
+of session-minutes fall on 2026-07-26. The peak is real; the span is not a claim about
+sustained load. The sealed dataset is a single day, so this caveat is about the sample
+column of the results tables only.
 
 **`audio_language` is dirty.** `hin`, `HIN` and `hin-hindi` are the same language and are
 stored as distinct values. The published slice figures are for the exact value as stored.
 
-**The MCP surface exposes three dimensions** where `v_occupancy_full` supports eight, so
-`category`, `app_version` and `player_version` are reachable from SQL and from the view but
-not from chat.
-
 **32 of 3,325 titles map to more than one `content_id`**, so a question phrased by title
-alone is ambiguous at the serving surface and has to be asked by id.
+alone is genuinely ambiguous. The chat surface refuses rather than guesses: it names the
+candidates and asks for a `content_id`. A title the dataset does not hold also fails
+loudly instead of falling through to the unfiltered total, which is the answer shape that
+would otherwise look right and be wrong.
 
 **Serving latency moves run to run**, several milliseconds either way. The stable claim is
 the SLO, p99 under 100 ms, and it passes with room. The digits in the results table are the
@@ -609,14 +764,15 @@ The README carries the argument. These pages carry the detail.
 
 | Page | What it covers |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | The model, the active rule, where the data dictionary is wrong, additivity across dimensions, why peak is not composable across time, the repository layout |
-| [docs/correctness.md](docs/correctness.md) | Gates A through D, the oracles, threshold sensitivity, occupancy against instantaneous per slice, the test suite |
+| [docs/architecture.md](docs/architecture.md) | The model, the active rule, where the data dictionary is wrong, additivity, the repository layout |
+| [docs/correctness.md](docs/correctness.md) | Gates A through D, the oracles, threshold sensitivity, occupancy against instantaneous, the tests |
 | [docs/serving.md](docs/serving.md) | The `marts` surface, RBAC and the query budget, projections, update handling |
 | [docs/observability.md](docs/observability.md) | ClickStack, Langfuse, the two-sink exporter, decline alerting |
 | [docs/mcp.md](docs/mcp.md) | The MCP tools, the guardrails, LibreChat and its two surfaces, the proven round trip |
-| [docs/operations.md](docs/operations.md) | Running it, every make target, local development surfaces, ClickHouse Cloud findings, Gate C |
-| [docs/unseen-day.md](docs/unseen-day.md) | The sealed-dataset runbook, command by command, and what to do when the CSV differs |
+| [docs/operations.md](docs/operations.md) | Running it, every make target, ClickHouse Cloud findings, Gate C |
+| [docs/unseen-day.md](docs/unseen-day.md) | The sealed-dataset runbook, and what to do when the CSV differs |
 | [docs/scale.md](docs/scale.md) | Sharding and read-cost proofs at 1x, 10x and 100x, user-level concurrency |
+| [docs/datasets.md](docs/datasets.md) | The two datasets, and the guard that stops a scratch run dropping the live `marts` |
 | [docs/cloud-dashboard.md](docs/cloud-dashboard.md) | The ClickHouse Cloud dashboard, tile by tile |
 | [docs/evidence.md](docs/evidence.md) | What lands in `answers/`, `evidence/` and `submission/`, the serving SLO, checking any number against a `query_id` |
 

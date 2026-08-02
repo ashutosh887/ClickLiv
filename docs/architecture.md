@@ -114,40 +114,57 @@ in the hot path.
 ## Repository layout
 
 ```
-sql/01_schema.sql            raw_events, content_meta, content_dict
-sql/02_sessionize.sql        the state machine, as window functions
-sql/03_occupancy.sql         session_minutes and the minute_occupancy rollup
-sql/04_deltas.sql            merged minute runs to signed deltas
-sql/05_oracles.sql           tables the Python reference is loaded into
-sql/06_marts.sql             parameterized views, RBAC, the query budget
-src/clickliv/answers.py      benchmark answers, latencies and evidence, no hand-typing
-sql/07_projections.sql       proj_content_minute, reordered by (content_id, minute)
-src/clickliv/projections.py  before/after/forced EXPLAIN, query_log confirmation
-src/clickliv/gate_c.py       Gate C, the held-out single-day dry run
-src/clickliv/scale.py        O7, the sharding and read-cost proofs at scale
-src/clickliv/ui.py           the minimal concurrency dashboard
-src/clickliv/userlevel.py    O4, session-level vs user-level concurrency, measured
-src/clickliv/crossover.py    the problem statement's dimension-crossover example
-src/clickliv/decline.py      optional: deterministic concurrency-decline alerting
-src/clickliv/llm.py          one optional LLM call, OpenAI first, Bedrock fallback
-sql/08_incremental.sql       open_session_state, mv_extend_open_session
-src/clickliv/incremental.py  proves the incremental path agrees with a batch rebuild
+sql/01_schema.sql             raw_events, content_meta, content_dict
+sql/02_sessionize.sql         the state machine, as window functions
+sql/03_occupancy.sql          session_minutes and the minute_occupancy rollup
+sql/04_deltas.sql             merged minute runs to signed deltas
+sql/05_oracles.sql            tables the Python reference is loaded into
+sql/06_marts.sql              parameterized views, RBAC, the query budget
+sql/07_projections.sql        proj_content_minute, reordered by (content_id, minute)
+sql/08_incremental.sql        open_session_state, mv_extend_open_session
+sql/09_dashboard.sql          the seven Cloud console saved queries, one per -- name:
+
+src/clickliv/cli.py           command dispatch, identical for local and Cloud
+src/clickliv/ch.py            zero-dependency ClickHouse HTTP client
+src/clickliv/load.py          CSV ingestion, content before events, and preflight
+src/clickliv/reference.py     ground truth, reads the CSV directly
+src/clickliv/verify.py        Gate A
+src/clickliv/gates.py         Gate B
+src/clickliv/gate_c.py        Gate C, the held-out single-day dry run
+src/clickliv/chdb_engine.py   Gate D, the whole pipeline in-process
+src/clickliv/sweep.py         threshold sensitivity grid
+src/clickliv/answers.py       benchmark answers, latencies and evidence, no hand-typing
+src/clickliv/submission.py    O2 answer bundle and the O6b serving SLO, one run
+src/clickliv/projections.py   before/after/forced EXPLAIN, query_log confirmation
+src/clickliv/scale.py         O7, the sharding and read-cost proofs at scale
+src/clickliv/userlevel.py     O4, session-level vs user-level concurrency, measured
 src/clickliv/instantaneous.py O3, instantaneous overlap beside occupancy, per slice
-src/clickliv/submission.py   O2 answer bundle and the O6b serving SLO, one run
-src/clickliv/mcp.py          the MCP server, four pre-vetted tools as marts_agent
-src/clickliv/cli.py          command dispatch, identical for local and Cloud
-src/clickliv/ch.py           zero-dependency ClickHouse HTTP client
-src/clickliv/load.py         CSV ingestion, content before events
-src/clickliv/reference.py    ground truth, reads the CSV directly
-src/clickliv/verify.py       Gate A
-src/clickliv/gates.py        Gate B
-src/clickliv/chdb_engine.py  Gate D, the whole pipeline in-process
-src/clickliv/sweep.py        threshold sensitivity grid
-src/clickliv/otel.py         OTLP exporter, two sinks, server-side metrics on spans
-src/clickliv/observe.py      reads the trace back out of ClickStack
-docker/librechat.yaml        LibreChat wired to both MCP surfaces, labelled
-docker/                      access management, ClickStack user, LibreChat config
-tests/                       stdlib unittest, zero dependencies, make test
+src/clickliv/incremental.py   proves the incremental path agrees with a batch rebuild
+src/clickliv/crossover.py     the problem statement's dimension-crossover example
+src/clickliv/decline.py       optional: deterministic concurrency-decline alerting
+src/clickliv/llm.py           one optional LLM call, OpenAI first, Bedrock fallback
+src/clickliv/claims.py        re-reads every published figure live, names stale docs
+src/clickliv/mcp.py           the MCP server, five pre-vetted tools as marts_agent
+src/clickliv/ui.py            the minimal local concurrency dashboard
+src/clickliv/otel.py          OTLP exporter, two sinks, server-side metrics on spans
+src/clickliv/observe.py       reads the trace back out of ClickStack
+
+scripts/copy_dataset.sh       clones a built dataset into a *_sample schema, fails closed
+scripts/verify_dashboard.sh   runs every sql/09_dashboard.sql query, read only
+scripts/public_demo.sh        opens and closes the public demo grants
+scripts/revoke_public.md      how to shut the public surface off again
+
+web/index.html                the hosted landing page
+web/dashboard.html            the hosted concurrency chart
+web/api/                      Vercel functions, marts_agent only, no admin credential
+
+docker/librechat.yaml         LibreChat wired to both MCP surfaces, labelled
+docker/                       access management, ClickStack user, provisioning
+tools/                        data fetch, the small fixture, the unseen-day fixtures
+tests/                        stdlib unittest, zero dependencies, make test
+fixtures/                     the small pipeline fixture and the adversarial fresh day
+answers/ evidence/ submission/ artifacts/   what a run produces, described in evidence.md
+docs/                         these pages
 ```
 
 Thresholds and credentials are `${VAR}` placeholders in the SQL, substituted from the

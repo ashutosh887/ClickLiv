@@ -11,36 +11,86 @@ make up          # ClickHouse 26.7 in Docker, or point .env at ClickHouse Cloud
 make all         # schema, load, sessionize, both serving paths, reference, Gate A
 ```
 
-`make all` runs CSV to Gate A in about 8 seconds.
+`make all` runs CSV to Gate A in seconds against local Docker and in minutes against
+Cloud, where every query pays a round trip. Measured figures are in the
+[wall clock table](unseen-day.md#wall-clock).
 
 ## Every make target
 
+Regenerated from the `Makefile`. Every target it declares is here.
+
+**The pipeline, end to end.**
+
 ```sh
-make up          # ClickHouse 26.7 in Docker, or point .env at ClickHouse Cloud
 make all         # schema, load, sessionize, both serving paths, reference, Gate A
-make gate-b      # rebuild twice, assert byte-identical serving tables
-make sweep       # threshold sensitivity grid
-make chdb        # same SQL in-process on chDB, no server at all
-make gate-c      # held-out single-day dry run, evidence in answers/gate_c and evidence/gate_c
-make scale       # O7: sharding and read-cost proofs at 1x/10x/100x, evidence/scale.txt
-make userlevel   # O4: session-level vs user-level concurrency, evidence/user_level.txt
-make crossover   # the problem statement's own dimension-crossover example, measured
-make decline     # optional: deterministic concurrency-decline alerting
-make incremental # a real open session absorbs a new heartbeat live, proven vs batch
-make instantaneous # O3: occupancy vs instantaneous overlap, for every dimension slice
-make submission  # O2: the answer bundle, plus the measured serving SLO (O6b)
-make replay      # the graded unseen-day run, reset to submission bundle, one command
-make mcp         # the guardrailed MCP server, four pre-vetted tools over marts
-make llm-up      # Langfuse 4.1.0, both of its databases ClickHouse products
-make chat-up     # LibreChat v0.8.7, wired to both MCP surfaces
+make pipeline    # the same without reference and Gate A
+make schema      # each stage is also callable on its own
+make load
+make reconcile
+make sessionize
+make occupancy
+make deltas
+make reference
+make verify
+make marts       # the parameterized views, the role and the query budget
+make projections
+make answers
+make reset       # drop everything this project created, including the marts schema
 ```
 
-The pipeline stages are also individually callable: `make schema`, `make load`,
-`make reconcile`, `make sessionize`, `make occupancy`, `make deltas`, `make reference`,
-`make verify`, `make pipeline`, `make marts`, `make answers`, `make projections`,
-`make ui`, `make obs`, `make ping`, `make test`, `make reset`. The Docker profiles have
-matching `down` and `logs` targets: `make down`, `make logs`, `make obs-down`,
-`make obs-logs`, `make llm-down`, `make llm-logs`, `make chat-down`, `make chat-logs`.
+**The gates and the measured proofs.**
+
+```sh
+make gate-b      # rebuild twice, assert byte-identical serving tables
+make gate-c      # held-out single-day dry run, evidence in answers/gate_c and evidence/gate_c
+make chdb        # Gate D: same SQL in-process on chDB, no server at all
+make sweep       # threshold sensitivity grid
+make scale       # O7: sharding and read-cost proofs at 1x/10x/100x, evidence/scale.txt
+make userlevel   # O4: session-level vs user-level concurrency, evidence/user_level.txt
+make instantaneous # O3: occupancy vs instantaneous overlap, for every dimension slice
+make crossover   # the problem statement's own dimension-crossover example, measured
+make incremental # a real open session absorbs a new heartbeat live, proven vs batch
+make decline     # optional: deterministic concurrency-decline alerting
+make submission  # O2: the answer bundle, plus the measured serving SLO (O6b)
+make claims      # re-read every published figure live, name every doc stating an old one
+```
+
+**The sealed-dataset path.** Described in full in [the unseen-day
+runbook](unseen-day.md).
+
+```sh
+make preflight RAW=<events> CONTENT=<content>   # read only, touches nothing
+make unseen    RAW=<events> CONTENT=<content>   # the graded run, one command
+make rollback                                    # put the previous demo back
+make unseen-fixture     # the adversarial synthetic fresh day
+make unseen-variants    # that day in every container and CSV quirk
+make replay             # superseded by make unseen, see the runbook
+```
+
+**Surfaces and fixtures.**
+
+```sh
+make up          # ClickHouse 26.7 in Docker, or point .env at ClickHouse Cloud
+make mcp         # the guardrailed MCP server, five pre-vetted tools over marts
+make ui          # the local concurrency dashboard
+make obs         # read the pipeline trace back out of ClickStack
+make ping        # name the host and database .env currently points at
+make llm-up      # Langfuse 4.1.0, both of its databases ClickHouse products
+make chat-up     # LibreChat v0.8.7, wired to both MCP surfaces
+make obs-up      # ClickStack
+make test        # 78 stdlib unittest tests, zero dependencies
+make data        # refetch the sample CSVs into data/
+make fixture     # the small pipeline fixture
+make fixture-pipeline   # the whole pipeline over that fixture, in-process
+```
+
+The Docker profiles have matching `down` and `logs` targets: `make down`, `make logs`,
+`make obs-down`, `make obs-logs`, `make llm-down`, `make llm-logs`, `make chat-down`,
+`make chat-logs`.
+
+`python -m clickliv snapshot` moves the serving tables aside without running anything
+else, and `python -m clickliv sql "<query>"` runs one query against the configured
+service. Neither has a make target.
 
 ## Local development surfaces
 
@@ -57,7 +107,7 @@ Start the stack with `make up && make obs-up && make llm-up && make chat-up`, th
 | LibreChat | <http://localhost:3080> | `make chat-up` | Ask for concurrency in plain language, answered through the guardrailed MCP tools |
 | Langfuse | <http://localhost:3300> | `make llm-up` | LLM and MCP traces, with token usage and cost, stored in our own ClickHouse Cloud service |
 | ClickStack (HyperDX) | <http://localhost:8080> | `make obs-up` | Pipeline traces, every stage and every query, with server-side `read_rows` attached |
-| MCP health | <http://localhost:8765/health> | `make mcp` | The four pre-vetted tools and the restricted user they run as |
+| MCP health | <http://localhost:8765/health> | `make mcp` | The five pre-vetted tools and the restricted user they run as |
 | ClickHouse MCP health | <http://localhost:8766/health> | `make chat-up` | The official read-only ClickHouse MCP surface |
 
 `UI_PORT` and `MCP_PORT` move the two Python servers; ClickStack also listens for OTLP on
@@ -133,19 +183,28 @@ real, Cloud-specific differences found and fixed while proving that, not assumed
 
 ## The unseen-day run
 
-The graded drop is one fresh CSV (O8), so the whole run is one command. Drop the new
-file into `data/`, point `RAW_CSV` at it in `.env`, then:
+The graded drop is one fresh pair of CSVs (O8), and the whole run is one command:
 
 ```sh
-make replay      # reset, schema, load, sessionize, occupancy, deltas, reference,
-                 # verify (Gate A), marts, projections, answers, instantaneous, submission
+make unseen RAW=<events.csv> CONTENT=<content.csv>
 ```
 
-Then commit `answers/`, `evidence/` and `submission/`. `replay` prints each step as it
-starts, stops at the first one that fails and names it, and reports its own wall clock
-at the end. Nothing about it is specific to the tuning file: the CSV paths are
-environment variables, and the thresholds are substituted into the SQL from the same
-place.
+The full procedure, what every stage prints, how to roll it back and what to do when the
+numbers look wrong is [the unseen-day runbook](unseen-day.md). Read that page, not this
+one, on the day.
+
+**Use `make unseen`, never `make replay`.** Both exist in the `Makefile` and both run
+essentially the same stage list, so the difference is easy to miss and expensive to get
+wrong. `replay` writes into `artifacts/`, `answers/`, `evidence/` and `submission/`,
+which are the committed tuning-data results, so it overwrites the very numbers the
+sealed run has to be compared against. `unseen` redirects all four roots under
+`unseen/`, takes its input files as arguments rather than from `.env`, names the host
+and database before it touches anything, additionally runs the `incremental` stage, and
+ends by printing the comparison table the README needs. It is a strict superset with
+guard rails. `replay` is kept only so an older transcript still resolves.
+
+Nothing about either is specific to the tuning file: the CSV paths are environment
+variables, and the thresholds are substituted into the SQL from the same place.
 
 That day-agnosticism is a property the loader had to be fixed to have, and it is worth
 stating plainly because the bug would have been expensive. `reconcile` used to compare

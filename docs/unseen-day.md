@@ -9,10 +9,55 @@ is the whole procedure. Read it top to bottom once; at 3am read only the boxed c
 make unseen RAW=data/final-raw.csv CONTENT=data/final-content.csv
 ```
 
-It preflights both files, moves the serving tables aside, ingests, runs the full
-pipeline, proves the four gates, emits the benchmark answers, the latencies, the
-pipeline evidence and a comparison table against the tuning run, then prints every file
-it wrote with its byte size.
+It preflights both files, moves the serving tables aside, drops and rebuilds the schema,
+ingests, runs the full pipeline, proves Gate A, emits the benchmark answers, the
+latencies, the pipeline evidence and a comparison table against the tuning run, then
+prints every file it wrote with its byte size.
+
+Gate A is the gate the graded run proves, and it is the one that matters: it diffs every
+interval and every rollup row against an independent Python recomputation of the same
+day. Gates B, C and D are separate targets (`make gate-b`, `make gate-c`, `make chdb`)
+and are not part of this run. Run them afterwards if there is time; do not hold the
+submission for them.
+
+### Do not run `make replay` instead
+
+The `Makefile` also has `make replay`, and on the day someone will reach for it. Run
+`make unseen`. The two are close enough to look interchangeable and are not:
+
+| | `make unseen` | `make replay` |
+| --- | --- | --- |
+| input files | `RAW=` and `CONTENT=` arguments | `RAW_CSV` and `CONTENT_CSV` edited into `.env` |
+| output | `unseen/artifacts`, `unseen/answers`, `unseen/evidence`, `unseen/submission` | `artifacts/`, `answers/`, `evidence/`, `submission/`, **overwriting the committed tuning run** |
+| stages | 16, including `incremental` | 15, no `incremental` |
+| database | `CREATE DATABASE IF NOT EXISTS` first, `DB=` override available | must already exist, no override |
+| before it starts | prints the raw file, the content file, the host, the database and the output root | prints nothing about its target |
+| at the end | the tuning-versus-sealed comparison table, and every file written with its size | a wall clock |
+
+What they do **not** differ on is risk to the live demo. Both run `preflight`, then
+`snapshot`, then `reset`, in that order, so both take the serving layer down for the
+length of the run and both are recovered the same way, with `make rollback`. There is no
+safe-versus-unsafe choice here. `unseen` is the one to run because it cannot silently
+destroy the tuning results the sealed run has to be compared against, and because it
+tells you what it is about to touch before it touches it.
+
+### What the run does to the live demo
+
+Worth reading once before you start it, because the serving layer really does go down.
+
+`snapshot` renames the six serving tables to `<name>__prev`. Nothing is dropped and
+nothing is lost. `reset` then runs, and it issues `DROP DATABASE IF EXISTS marts` plus
+`DROP TABLE IF EXISTS` for each serving table by name. Those tables no longer exist under
+those names, because `snapshot` just renamed them, so the drops hit nothing and the
+`__prev` copies are untouched. The one thing `reset` genuinely destroys is the `marts`
+schema, along with the `marts_agent` user, the `marts_readonly` role and the
+`marts_budget` profile.
+
+So from the moment `reset` runs until the `marts` stage completes, every consumer that
+reads `marts` is down: the Vercel dashboard, the MCP server, LibreChat and the Cloud
+console dashboard. That window is the length of the pipeline, minutes against Cloud.
+Nothing is lost, everything comes back, but do not start the run while a judge is looking
+at the chart, and do not run it from a scratch `DB=` while the live demo is being shown.
 
 With no `DB` argument it builds into whatever `CH_DATABASE` says, which is the primary
 `clickliv`. That is deliberate and it is the production path: the Vercel dashboard, the
@@ -32,10 +77,13 @@ Options, all optional:
 | `DB=name` | ClickHouse database to build in, created if absent | whatever `CH_DATABASE` says |
 | `CSV_RENAME=theirs=ours,...` | map a renamed column back | none |
 
-Two warnings about `DB=`. It builds a scratch database for rehearsal only. The answers
-step reads the `marts` database by name, so a scratch run's `benchmark_answers.csv`
-comes from whatever `marts` currently points at rather than from the scratch tables.
-Rehearse with it, never read answers off it.
+`DB=` builds a scratch database for rehearsal. Every schema name follows
+`marts_database()` in `src/clickliv/cli.py`, so a run against `DB=clickliv_rehearsal`
+builds and answers from `marts_clickliv_rehearsal` and leaves the live `marts` alone.
+That holds for `reset`, for `marts` and for the benchmark answers alike; both used to
+resolve to the primary schema, fixed in `b28826a` and `8eaf6ae`. Rehearse with `DB=`
+freely, but do not use it for the graded run: the answers must come from the same
+`clickliv` and `marts` every live surface reads.
 
 The target reads `.env` for the server, exactly like every other target. Nothing else
 needs editing.
@@ -83,9 +131,21 @@ cadence   p50 40.000s  p90 40.000s  p99 60.000s  mode 40s x507  (517 gaps ...)
 `GRACE_SECONDS` credits a session for that long after each heartbeat. If the sealed data
 beats every 60 seconds and the grace is 40, every session loses 20 seconds between
 beats, sessions fragment, and the peak collapses into a number that looks plausible and
-is wrong. Preflight fails when the observed p90 gap exceeds the grace, and when
-`GAP_SECONDS` is at or below the p90 gap. The recovery is to re-derive the pair rather
-than to guess:
+is wrong. This project measured the tuning data's cadence at 40s, not the documented 60s,
+which is why `GRACE_SECONDS` defaults to 40 and `GAP_SECONDS` to 90. The sealed data owes
+that nothing.
+
+`cadence_check` in `src/clickliv/load.py` enforces the pair against the file, with a one
+second tolerance so a clean 40.000s cadence against a grace of 40 does not trip:
+
+| Rule | Outcome |
+| --- | --- |
+| p90 gap > `GRACE_SECONDS` + 1 | **fails the run.** Sessions would fragment between beats |
+| `GAP_SECONDS` <= p90 gap | **fails the run.** Ordinary heartbeat spacing would read as a session break |
+| `GRACE_SECONDS` > 1.5 x p90 gap + 1 | warns only. Every session is credited well past its last heartbeat, so the peak drifts high |
+| fewer than a handful of gaps sampled | warns only. Too little data to judge the cadence at all |
+
+The recovery is to re-derive the pair rather than to guess:
 
 ```sh
 make sweep                       # sweeps gap and grace, reports peak sensitivity
@@ -94,6 +154,19 @@ make sweep                       # sweeps gap and grace, reports peak sensitivit
 
 **snapshot.** Renames the six serving tables to `<name>__prev` instead of dropping them.
 Metadata only, so it costs about four seconds against Cloud whatever the row count.
+
+```
+kept aside as __prev: raw_events, content_meta, active_intervals, session_minutes,
+                      minute_occupancy, minute_deltas
+```
+
+If it says `nothing, the database was empty` you are pointed at the wrong database. Stop
+and run `make ping`.
+
+**reset.** Drops the `marts` schema and its user, role and profile. This is where the
+live serving surfaces go dark, and they stay dark until the `marts` stage several
+minutes later. Prints one word, `dropped`. Nothing recoverable is lost here; see
+[what the run does to the live demo](#what-the-run-does-to-the-live-demo).
 
 **load.** Two lines describing the files as read, then the row counts, then the
 reconcile table:
@@ -256,7 +329,8 @@ heartbeats repeating the millisecond before them, a session that switches `conte
 halfway through, a heartbeat gap wide enough to be excluded, a country that is not
 `india`, a platform never seen before, a `video_type` never seen before, and rows out of
 timestamp order. Point `DB` at a throwaway database, never at the one holding the real
-load, and read Gate A rather than the answers, for the reason in the options table above.
+load. Read Gate A: on a rehearsal it is the whole point, and the answers off a synthetic
+day mean nothing.
 
 To rehearse the formats rather than the day:
 
@@ -279,14 +353,16 @@ there before a single table is written.
 
 | What you see | Most likely cause | Where to look, and what to do |
 | --- | --- | --- |
-| Peak collapses to a small number | `GRACE_SECONDS` no longer matches the heartbeat cadence, so every session fragments between beats | Preflight prints the measured p50 and p90. If p90 differs from `GRACE_SECONDS`, run `make sweep` and re-derive the gap and grace pair from the curve rather than guessing |
-| Peak is far higher than expected | Foreground exclusion is not firing, because the background markers were renamed or are absent | Preflight lists `event_type` and `event` values present. Compare against `classify()` in `src/clickliv/reference.py` and `sql/02_sessionize.sql`, which must be changed together |
-| Everything is zero | Nothing counted as playing at all | Sessionize aborts loudly on an unknown vocabulary, so read that message. If the load itself was empty, `reconcile` reports it |
+| Peak collapses to a small number | `GRACE_SECONDS` is below the heartbeat cadence, so every session fragments between beats | Preflight prints the measured p50, p90 and p99. Preflight should already have failed the run; if it only warned, the p90 is within a second of the grace. Run `make sweep` and re-derive the gap and grace pair from the curve rather than guessing |
+| Peak drifts high, and the curve looks smeared rather than spiky | `GRACE_SECONDS` is far above the cadence, so every session is credited long past its last heartbeat. Preflight warns about this and does not fail | Same fix. `make sweep`, then set the pair in `.env`. The tuning grid moves the peak only 0.3%, so a large move here means the cadence really did change |
+| Peak is far higher than expected | Foreground exclusion is not firing, because the background markers were renamed or are absent | The markers live in exactly two places and **both must be changed together**: the `multiIf` in `sql/02_sessionize.sql` and `classify()` with `VOCABULARY` in `src/clickliv/reference.py`. Changing one and not the other does not fail loudly, it makes Gate A fail, which is the correct outcome but a slower diagnosis. Preflight lists the `event_type` and `event` values present, so compare against both files |
+| Everything is zero | Nothing counted as playing at all | Sessionize aborts loudly below 50% of sessions ever active and prints every `event_type` and `event` in the file marked recognised or not, plus the recognised tokens that are absent. Read that table. If the load itself was empty, `reconcile` reports it |
 | Peak lands in an absurd minute | Timestamps are seconds where milliseconds are expected, which puts every row near 1970 | Preflight fails on epochs outside the millisecond range before any table is touched |
 | A filtered slice returns zero while the total is fine | That dimension value does not exist on the new data | Preflight warns per benchmark slice by name. `marts.v_dimension_values` lists what does exist |
-| The four paths disagree | The model is wrong, not the data | `evidence/oracle_match.csv` and the Gate A output name which path diverged. `maxIntersections` shares no code with the rollup, so trust the disagreement |
-| Queries suddenly slow | The projection or `marts.dimension_value` was not rebuilt | Re-run `make projections` and `make marts`, then confirm with `system.query_log` |
-| The chat answers nothing | `marts.dimension_value` is stale after a reload | `make marts` repopulates it. The MCP server refreshes its cache on its own and needs no restart |
+| The paths disagree | The model is wrong, not the data | `evidence/oracle_match.csv` and the Gate A output name which path diverged. `maxIntersections` shares no code with the rollup, so trust the disagreement |
+| Queries suddenly slow | The projection or `marts.dimension_value` was not rebuilt | `sql/03_occupancy.sql` drops and recreates `minute_occupancy`, which takes `proj_content_minute` with it. Re-run `make projections` and `make marts`, then confirm with `system.projections` and `system.query_log` |
+| The chat answers nothing, or every filter is rejected | `marts.dimension_value` is stale or empty after a reload | `make marts` repopulates it. The MCP server re-reads the accepted values every five minutes and immediately on any miss, so it needs no restart |
+| The dashboard and the chat are both dead mid-run | Expected. `reset` has dropped `marts` and the `marts` stage has not run yet | Wait for the `===== marts =====` stage. If the run already failed, `make rollback` restores the previous demo in seconds |
 | A published figure no longer matches | A document is stating a superseded number | `make claims` names every document and line still carrying the old value |
 
 The order to work in: preflight, then the gates, then `make claims`, then the serving

@@ -42,11 +42,14 @@ well, so it fails closed. `./scripts/copy_dataset.sh clickliv` and
 `./scripts/copy_dataset.sh marts` both refuse before opening a connection.
 
 The guard lives in the script rather than in the environment because the environment is
-what cannot be trusted. `step_reset` in `src/clickliv/cli.py` issues a literal
-`DROP DATABASE IF EXISTS marts` plus drops of `marts_agent`, `marts_readonly` and
-`marts_budget`, and it ignores `CH_DATABASE`. Since `reset` is the third step of both
-`replay` and `unseen`, running either against a scratch database takes the live `marts`
-schema down with it. Copying tables directly avoids that path entirely.
+what cannot be trusted. `reset` is the third stage of both `replay` and `unseen`, and it
+issues an unconditional `DROP DATABASE` against whichever marts schema it resolves.
+`step_reset` in `src/clickliv/cli.py` resolves that name through `marts_database()`, so a
+scratch run drops only its own `marts_<database>` and leaves the global `marts_agent`
+user, `marts_readonly` role and `marts_budget` profile alone. It did not always: a
+scratch run used to take the live `marts` and its user down with it, which is what
+commit `b28826a` fixed. Copying tables directly avoids the whole path rather than relying
+on that resolution staying correct.
 
 ## Verified against the live schema
 

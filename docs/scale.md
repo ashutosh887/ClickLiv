@@ -148,9 +148,20 @@ The data dictionary says user-level concurrency can be derived from `user_id`. T
 serving layer stays session-level by default; `make userlevel` measures the
 alternative instead of asserting it, writing `evidence/user_level.txt`. At the peak
 minute, 2,692 concurrent sessions resolve to 2,626 concurrent users, exact and
-HyperLogLog agreeing to 0.00% error at this cardinality. The 66-session gap is
-explained entirely by 784 users running more than one concurrent session, a second
-device on an account already counted, not by noise. That also confirms `uniq` /
+HyperLogLog agreeing to 0.00% error at this cardinality. The 66-session gap is a second
+device on an account already counted, not noise: 66 of the 2,692 sessions live at that
+minute belong to an account that already has another session live at that same minute,
+which is user-level concurrency running 2.5% below session-level at the peak.
+
+Two other counts in that evidence file measure the whole 11.8-day extract rather than
+the peak minute, and are easy to misread as the explanation for the 66. Over the full
+window 784 users opened more than one session at some point, and 120 sessions carry more
+than one `user_id`. Neither is a concurrency figure. The peak-minute overlap is bounded
+by the 66 above, and it has to be: if 784 accounts were each running a second session in
+that one minute the gap would be at least 784, not 66. The 784 is the population the 66
+is drawn from, nothing more.
+
+The peak-minute reading also confirms `uniq` /
 `uniqState` / `uniqMerge` reproduces `uniqExact` exactly here, so it is a bounded,
 mergeable choice if user-level concurrency is ever asked for. No second persisted
 serving table was built for a metric nobody asked for; this diagnostic proves the

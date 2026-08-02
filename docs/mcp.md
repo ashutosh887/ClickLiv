@@ -126,17 +126,17 @@ would break every caller the moment the SQL is applied.
 
 `dimension_value` exists for one reason. The case-fold fallback has to ask whether a
 value exists exactly, and asking that of `minute_occupancy` costs a full scan of the
-serving table once per filtered dimension. Measured on the Cloud service, that took a
-query from 96,818 rows read with no filters to 871,362 with all eight, which cancels
-out the read advantage the whole design exists to demonstrate. Against the small table
-the same test is a few hundred rows, and the same eight-filter query reads 99,293.
+serving table once per filtered dimension: 96,818 rows with no filters, 871,362 with all
+eight, one further scan of the fact table per predicate. That cancels out the read
+advantage the whole design exists to demonstrate. Resolving against the small table
+instead makes the cost flat in the number of filters, 97,043 rows at zero filters and
+98,393 at eight.
 
-| filters | rows read before | rows read after |
-| --- | --- | --- |
-| none | 96,818 | 96,818 |
-| one | 193,636 | 97,493 |
-| three | 387,272 | 98,168 |
-| eight | 871,362 | 99,293 |
+The after figures are measured rather than restated here, one table for the whole
+project: `evidence/read_cost_by_filter_count.txt` carries every row with the `query_id`
+the client generated before the query ran, so each one can be looked up in
+`system.query_log` and checked. [scale.md](scale.md#the-serving-layers-read-cost-tracks-the-rollup-not-the-raw-event-count)
+reads that file and makes the flatness argument in full.
 
 `v_dimension_values` deliberately carries no concurrency figure. A peak per value has
 to sum across the other dimensions before the maximum is taken, and a `GROUP BY` there

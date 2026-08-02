@@ -32,9 +32,9 @@ live`.
 `marts` is the only granted surface. `marts_agent` holds a role scoped to `SELECT ON
 marts.*`, nothing on the tables underneath, enforced by `SQL SECURITY DEFINER` on the
 views so the invoker's own grants are never checked against `minute_occupancy`.
-Verified: dropping `DEFINER` makes the same query 403 for `marts_agent` even though
-the view itself is granted, because ClickHouse checks the invoker's rights on the
-underlying table by default.
+Verified: dropping `DEFINER` makes the same query fail with `497 ACCESS_DENIED` for
+`marts_agent` even though the view itself is granted, because ClickHouse checks the
+invoker's rights on the underlying table by default.
 
 `marts_agent`'s settings profile carries `readonly = 1 CONST`, so it cannot raise its
 own ceiling; every attempt to touch `max_execution_time`, `max_rows_to_read`, or
