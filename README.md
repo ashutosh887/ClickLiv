@@ -38,29 +38,38 @@ one rollup. It absorbs still-open sessions incrementally as heartbeats keep arri
 exposes the same numbers through a web dashboard, a conversational surface and an MCP
 server, all reading through one budgeted read-only role.
 
-## Hosted Demo
+## Demo
 
-- **[clickliv.vercel.app](https://clickliv.vercel.app)**, the concurrency curve and its
-  filters, reading `marts.v_concurrency` through a serverless proxy as the same restricted
-  budgeted role every other consumer uses. No admin credential exists in that environment,
-  and the API response says so in a `served_by` field.
-- **[librechat.15-252-63-157.sslip.io](https://librechat.15-252-63-157.sslip.io)**, ask for
-  any of these numbers in plain language.
-- **[langfuse.15-252-63-157.sslip.io](https://langfuse.15-252-63-157.sslip.io)**, the LLM
-  traces, stored in this project's own ClickHouse Cloud service.
-- **[clickstack.15-252-63-157.sslip.io](https://clickstack.15-252-63-157.sslip.io)**, the
-  pipeline traces. The starred **ClickLiv pipeline telemetry** dashboard is the panel worth
-  opening.
+**[clickliv.vercel.app](https://clickliv.vercel.app)** is up, and needs nothing to be running
+behind it.
 
-The data lives in a ClickHouse Cloud service in `ap-south-1` with 2 replicas, next to a
-ClickHouse managed Postgres service in the same region. The three self-hosted surfaces run
-on one EC2 instance in `ap-south-1` behind Caddy for automatic HTTPS.
+The Click-a-thon is over, so the hosted ClickHouse Cloud service is stopped and the EC2
+instance that carried LibreChat, Langfuse and ClickStack is terminated. Rather than leave a
+dashboard pointing at a database that is no longer there, `make web-snapshot` froze the served
+marts into `web/snapshot` first: the 704,123-row rollup packed as 16-bit columns and gzipped to
+2 MB, alongside the catalogue, the titles and the naive series.
+
+The page recomputes every filter, grain and slice in the browser from that snapshot, so what
+you get is the graded data answering your query rather than a screenshot of it. A **Live**
+toggle in the header switches back to the `/api` routes for anyone running the project
+themselves. The deployment holds no credential of any kind, and with none set the API fails
+closed rather than open.
+
+The snapshot is not taken on trust. `make web-snapshot` refuses to write unless the peak, the
+minute count and every dimension value it encodes match the marts views it just read. The
+browser engine was then diffed against ClickHouse itself across twelve filter and grain
+combinations plus the headline, and all thirteen agreed exactly, including the case-insensitive
+value fallback the parameterized view performs. It is the sixth independent implementation in
+a project whose central claim is that implementations that share no code must agree.
+
+The three self-hosted surfaces now run from a clone. [How to run it](#how-to-run-it) has the
+command for each.
 
 ## Demo Video
 
-**<https://youtu.be/RCbLC5MoHrw>**, the recorded 2 to 3 minute walkthrough: the concurrency
-curve and its filters live against the hosted demo, the conversational layer answering in
-English, then the correctness gates and the `query_log` evidence behind every number below.
+**<https://youtu.be/RCbLC5MoHrw>**, the 2 to 3 minute walkthrough recorded while the hosted
+demo was still live: the concurrency curve and its filters, the conversational layer answering
+in English, then the correctness gates and the `query_log` evidence behind every number below.
 
 The pitch deck is [`docs/pitch-deck.pdf`](docs/pitch-deck.pdf), 14 slides.
 
@@ -315,7 +324,7 @@ watched. Method and the full disagreement table are in
 
 ## The concurrency curve, and the SQL behind it
 
-The curve is live in the product at **[clickliv.vercel.app](https://clickliv.vercel.app)**:
+The curve is in the product at **[clickliv.vercel.app](https://clickliv.vercel.app)**:
 foreground-only concurrency over the whole window, the naive open-session curve drawn behind
 it for contrast, and the ramp into the peak minute visible at minute grain. The filters
 redraw it.
@@ -698,13 +707,36 @@ The runbook is [docs/unseen-day.md](docs/unseen-day.md).
 
 ## How to run it
 
+Everything runs on localhost. No hosted service, no account and no card, and the defaults in
+`.env.example` are the local ones.
+
 ```sh
+git clone https://github.com/ashutosh887/ClickLiv && cd ClickLiv
 cp .env.example .env
 make data                 # fetch the two source CSVs; data/ is gitignored
 make up && make all       # ClickHouse in Docker, then CSV to Gate A, about 11 seconds
 ```
 
-Point `.env` at ClickHouse Cloud instead of running `make up` to use a hosted service.
+`make all` finishes by printing the 12 cross-path checks. That is the whole correctness claim,
+and it needs nothing beyond the three commands above.
+
+Point `.env` at a ClickHouse Cloud service instead of running `make up` to use a hosted one.
+Every command works unchanged either way, which is the reason the block exists in
+`.env.example` at all.
+
+### One command per surface
+
+| Command | Brings up | Needs first |
+|---|---|---|
+| `make up` | ClickHouse on <http://localhost:8123> | nothing |
+| `make ui` | The dashboard on <http://localhost:8090> | `make all`, then `make marts` |
+| `make mcp` | The MCP server on <http://localhost:8765> | `make marts` |
+| `make obs-up` | ClickStack on <http://localhost:8080> | nothing |
+| `make chat-up` | LibreChat on <http://localhost:3080> | `make mcp`, and four generated secrets |
+| `make llm-up` | Langfuse on <http://localhost:3300> | a Postgres, an S3 bucket, a model key |
+
+Each has a matching `down`: `make down`, `make obs-down`, `make chat-down`, `make llm-down`.
+Volumes survive a `down`, so the next `up` still has its data.
 
 | Target | What it does |
 |---|---|
@@ -712,14 +744,38 @@ Point `.env` at ClickHouse Cloud instead of running `make up` to use a hosted se
 | `make chdb` | **Gate D**, the whole pipeline in-process with chDB, no server, same hashes |
 | `make marts` | The parameterized serving view, the role and the query budget |
 | `make answers` | The benchmark answer set through `marts`, plus latencies and EXPLAIN |
+| `make web-snapshot` | Freeze the served marts into `web/snapshot`, verified against the views |
 | `make claims` | Re-read every published figure live and name any document stating a superseded one |
 | `make unseen RAW= CONTENT=` | The sealed-dataset run: answers, latencies, evidence, comparison table |
-| `make mcp` / `make chat-up` / `make llm-up` / `make obs-up` | The MCP server, LibreChat, Langfuse, ClickStack |
 | `make test` | 104 tests, in under a second |
 
 Every other target, and there are thirty, is listed in
-[docs/operations.md](docs/operations.md). `make replay` composes the full run end to end in 52
-seconds against Cloud.
+[docs/operations.md](docs/operations.md).
+
+### Credentials, and what creates each one
+
+No secret is committed. `.env` is gitignored, and `.env.example` is an annotated template that
+carries the exact SQL and `openssl` line beside every block. Nothing below reaches a browser:
+the web API pins the username and the database in `web/api/_clickhouse.js`, so no environment
+setting can widen them.
+
+- **ClickHouse itself.** `docker-compose.yml` creates the `clickliv` user on first start. Those
+  three values are fixed in the compose file, so the `CH_USER`, `CH_PASSWORD` and `CH_DATABASE`
+  in `.env` have to match them. They already do.
+- **`marts_agent`,** the read-only role every consumer authenticates as. Created by
+  `make marts` from `MARTS_PASSWORD`, granted `SELECT` on the marts schema and nothing else,
+  under a settings profile that caps execution time, memory and rows read. Change
+  `MARTS_PASSWORD` before you run it; the shipped value is deliberately `Change-Me-1!`, and
+  Cloud rejects anything without an uppercase letter, a digit and a symbol.
+- **`mcp_agent`,** the same idea for the MCP surface with its own budget. Created once by hand
+  rather than on every run, so the SQL sits in `.env.example`.
+- **LibreChat** needs four secrets it cannot generate itself. `openssl rand -hex 32` for three
+  of them, `openssl rand -hex 16` for the IV.
+- **Langfuse** needs a Postgres URL, an S3 bucket for event blobs, and a model key. Leave
+  `LANGFUSE_HOST` unset and the sink is simply off, which is what you want if you only came for
+  the pipeline.
+- **Model keys are optional throughout.** With none set, everything is deterministic and the
+  only thing missing is one narration line in `make decline`.
 
 ---
 
@@ -769,8 +825,24 @@ The README carries the argument. These pages carry the detail.
 Also in `docs/`: `serving.md`, `observability.md`, `mcp.md`, `operations.md`, `scale.md`,
 `datasets.md` and `cloud-dashboard.md`.
 
+---
+
+## Afterwards
+
 Built by **DevSapiens** for the ClickHouse Click-a-thon 2026, SonyLIV foreground-only
-concurrency track.
+concurrency track. It did not place in the top ten.
+
+The infrastructure came down the same day: the ClickHouse Cloud service is stopped with its
+data intact, the managed Postgres and the EC2 instance that carried the self-hosted surfaces
+are gone, the Elastic IP is released, and every credential has been removed from every hosted
+environment. What is left costs nothing to keep and asks nothing of anyone reading it.
+
+The repository is the artifact now, and it is a complete one. Three commands reproduce the
+whole pipeline and its twelve cross-path checks from a clean clone. The graded answers,
+latencies and evidence are committed under `answers/`, `evidence/` and `submission/`, each with
+a `query_id` that can be checked against the run it came from. The dashboard still answers
+arbitrary slices without a database behind it. The numbers were right when they were measured
+and they are still reproducible, which was the point of building it this way.
 
 ## Licence
 

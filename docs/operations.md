@@ -114,9 +114,14 @@ Start the stack with `make up && make obs-up && make llm-up && make chat-up`, th
 4317 and 4318, and keeps its own ClickHouse on 8124. ClickHouse itself answers on 8123
 in Docker and on 8443 when `.env` points at Cloud.
 
-## The public EC2 deployment
+## The public EC2 deployment, retired
 
-LibreChat, Langfuse and ClickStack also run permanently on one EC2 instance
+> This deployment no longer exists. The instance was terminated and the Elastic IP
+> released after the Click-a-thon, so every `sslip.io` hostname below is dead and
+> the three surfaces run locally instead, one `make` target each. The section is
+> kept because it records how the hosted deployment was put together.
+
+LibreChat, Langfuse and ClickStack also ran permanently on one EC2 instance
 (`i-04c48ddbea3351191`, `t3.large`, `ap-south-1`), behind Caddy for automatic HTTPS
 on sslip.io hostnames (no domain needed, real Let's Encrypt certs). Same
 `docker-compose.yml`, same `.env`, pointed at the same ClickHouse Cloud service, just
@@ -133,10 +138,12 @@ Teardown after the deadline: `aws ec2 terminate-instances --instance-ids
 i-04c48ddbea3351191 --region ap-south-1` and release the Elastic IP, or it keeps
 billing in a tiny amount against the AWS hackathon credit.
 
-The only things that are not local are the managed services this project stores data in:
-a ClickHouse Cloud service named `ClickLiv` in `ap-south-1`, and the
-`clickliv-langfuse` managed Postgres service beside it. Both are private to the team's
-org, reached through the ClickHouse Cloud console at <https://console.clickhouse.cloud>.
+The managed services this project stored data in were a ClickHouse Cloud service named
+`ClickLiv` in `ap-south-1` and the `clickliv-langfuse` managed Postgres beside it, both
+private to the team's org and reached through <https://console.clickhouse.cloud>. The
+Postgres has since been deleted and the ClickHouse service is stopped with its data
+intact; starting it again from the console is all that live mode needs.
+
 Answers and evidence live in the repo rather than behind a URL, in `answers/`,
 `evidence/` and `submission/`, described in [evidence.md](evidence.md).
 `sql/09_dashboard.sql` holds the saved queries for a Cloud console dashboard.

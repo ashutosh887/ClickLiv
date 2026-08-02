@@ -67,14 +67,16 @@ synchronous MergeTree inserts and the panel that would move first on a live feed
 over the same client that runs the pipeline. ClickHouse is the analytical engine on both
 sides of the integration.
 
-### The hosted ClickStack
+### The hosted ClickStack, retired
 
-The demo instance is the same all-in-one image on EC2, behind Caddy, with OTLP published
-over TLS at `https://otlp.15-252-63-157.sslip.io` so a pipeline run anywhere can export
-to it. Point `CLICKSTACK_OTLP` at that host, set `CLICKSTACK_KEY` to the team ingestion
-key, and the spans land in the hosted HyperDX. That is how the traces on it got there:
-real runs of `all`, `answers`, `crossover`, `userlevel`, `instantaneous`, `decline`,
-`submission` and `ping`, nothing hand written.
+The demo instance was the same all-in-one image on EC2, behind Caddy, with OTLP published
+over TLS at `https://otlp.15-252-63-157.sslip.io` so a pipeline run anywhere could export
+to it. It was terminated after the Click-a-thon, so that hostname is dead and
+`make obs-up` on <http://localhost:8080> is the way to see this now. Pointing
+`CLICKSTACK_OTLP` at any reachable collector and `CLICKSTACK_KEY` at its ingestion key
+still works the same way. That is how the traces on it got there: real runs of `all`,
+`answers`, `crossover`, `userlevel`, `instantaneous`, `decline`, `submission` and `ping`,
+nothing hand written.
 
 `docker/clickstack_provision.py` creates what the instance shows on arrival: a dashboard
 named **ClickLiv pipeline telemetry** and two saved searches, all three starred. Its
@@ -82,7 +84,7 @@ tiles are raw SQL against `otel_traces`, deliberately with no time macro, so the
 whole history rather than whatever range the viewer happens to have selected:
 
 ```sh
-HYPERDX_URL=https://clickstack.15-252-63-157.sslip.io \
+HYPERDX_URL=http://localhost:8080 \
 HYPERDX_EMAIL=... HYPERDX_PASSWORD=... python3 docker/clickstack_provision.py
 ```
 
