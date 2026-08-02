@@ -198,7 +198,8 @@ that tells you whether the tools are really attached.
 
 ## LibreChat v0.8.7 talks to two MCP surfaces, and says which one it used
 
-`make chat-up` brings it up from `docker compose --profile chat`, with OpenAI `gpt-5.2`
+`make chat-up` brings it up from `docker compose --profile chat`, with Google AI Studio
+`gemini-3-flash-preview`
 as the model provider and MongoDB for its own state. Meilisearch
 and the RAG API, the two optional sidecars, are left out on purpose: neither is needed
 to chat over MCP. `docker/librechat.yaml` wires in `clickliv-marts`, the guardrailed
