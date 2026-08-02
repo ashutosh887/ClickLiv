@@ -13,16 +13,16 @@ make:
 ```
 PASS  intervals: SQL == python reference             0 only in SQL, 0 only in reference
 PASS  rollup: occupancy == python reference          0 only in SQL, 0 only in reference
-PASS  deltas == occupancy, no filter                 3649 minutes, peak 2692
-PASS  deltas == occupancy, platform ANDROID_PHONE    3561 minutes, peak 1704
-PASS  deltas == occupancy, platform SONY_ANDROID_TV  119 minutes, peak 279
-PASS  deltas == occupancy, video_type live           65 minutes, peak 425
-PASS  deltas == occupancy, audio_language hin        3398 minutes, peak 1614
-PASS  deltas == occupancy, IPHONE in india           763 minutes, peak 329
-PASS  deltas == occupancy, vod on Mweb               60 minutes, peak 62
-PASS  half-open sweep == python instantaneous peak   sweep 2282, reference 2282
-PASS  maxIntersections >= half-open sweep            maxIntersections 2282, sweep 2282, difference 0
-PASS  instantaneous peak <= occupancy peak           2282 <= 2692, gap 410
+PASS  deltas == occupancy, no filter                 4145 minutes, peak 22175
+PASS  deltas == occupancy, platform ANDROID_PHONE    3286 minutes, peak 6513
+PASS  deltas == occupancy, platform SONY_ANDROID_TV  406 minutes, peak 3308
+PASS  deltas == occupancy, video_type live           668 minutes, peak 10314
+PASS  deltas == occupancy, audio_language hin        3221 minutes, peak 11255
+PASS  deltas == occupancy, IPHONE in india           771 minutes, peak 715
+PASS  deltas == occupancy, vod on Mweb               80 minutes, peak 75
+PASS  half-open sweep == python instantaneous peak   sweep 20003, reference 20003
+PASS  maxIntersections >= half-open sweep            maxIntersections 20003, sweep 20003, difference 0
+PASS  instantaneous peak <= occupancy peak           20003 <= 22175, gap 2172
 ```
 
 ```
@@ -104,15 +104,15 @@ computes both for all seven slices Gate A checks and writes
 
 | Slice | Occupancy | Instantaneous | Gap |
 |---|---|---|---|
-| no filter | 2,692 | 2,282 | 15.2% |
-| platform ANDROID_PHONE | 1,704 | 1,442 | 15.4% |
-| platform SONY_ANDROID_TV | 279 | 246 | 11.8% |
-| video_type live | 425 | 354 | 16.7% |
-| audio_language hin | 1,614 | 1,405 | 12.9% |
-| IPHONE in india | 329 | 263 | 20.1% |
-| vod on Mweb | 62 | 51 | 17.7% |
+| no filter | 22,175 | 20,003 | 9.8% |
+| platform ANDROID_PHONE | 6,513 | 5,563 | 14.6% |
+| platform SONY_ANDROID_TV | 3,308 | 3,119 | 5.7% |
+| video_type live | 10,314 | 9,536 | 7.5% |
+| audio_language hin | 11,255 | 10,488 | 6.8% |
+| IPHONE in india | 715 | 574 | 19.7% |
+| vod on Mweb | 75 | 62 | 17.3% |
 
-The gap runs from 11.8% to 20.1%, so the two readings are not interchangeable at any
+The gap runs from 5.7% to 19.7%, so the two readings are not interchangeable at any
 slice and the choice has to be stated rather than assumed. Two independent SQL paths
 produce the instantaneous column and agree exactly on all seven: `maxIntersections`
 over closed millisecond intervals, and a signed event sweep on the half-open form.
@@ -120,11 +120,11 @@ over closed millisecond intervals, and a signed event sweep on the half-open for
 The method has to add dimensions without moving the number. Each active interval is
 clipped to every minute it covers, that minute's dimension tuple is joined in from
 `session_minutes`, the filter is applied, each session's surviving pieces are merged
-back into continuous presence, and only then is the overlap peaked. Unfiltered, the
-clipping produces 137,738 pieces and the merge returns exactly 32,164 intervals, the
-same segment count as `active_intervals` and as the independent Python reference, so the
-merge validates itself rather than being taken on trust. The unfiltered instantaneous
-peak is 2,282 either way, which Gate A pins to that reference.
+back into continuous presence, and only then is the overlap peaked. The merge returns
+exactly 177,372 intervals, the same segment count as `active_intervals` and as the
+independent Python reference, so the merge validates itself rather than being taken on
+trust. The unfiltered instantaneous peak is 20,003 either way, which Gate A pins to
+that reference.
 
 Occupancy leads, because the problem statement's own worked example reads that way, and
 the instantaneous figure is reported alongside it per slice. Instantaneous can never

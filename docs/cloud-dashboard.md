@@ -485,9 +485,9 @@ they end up on separate charts the tile has lost its entire point.
 
 Suggested titles, if you want them to read as an argument rather than as column names:
 
-1. Counting every open session overstates the peak by 39 percent
+1. Counting every open session overstates the peak by 9.1 percent
 2. Naive against foreground, minute by minute
-3. Foreground-only concurrency, 2,692 at 10:56 UTC
+3. Foreground-only concurrency, 22,175 at 11:16 UTC
 4. Where the load came from
 5. Live peaks 20 minutes before vod
 6. Serving latency, median 29 ms
@@ -507,29 +507,28 @@ The SQL is the last query in [`sql/09_dashboard.sql`](../sql/09_dashboard.sql). 
 long to paste and runs in about a third of a second.
 
 It slices by whatever platforms are present rather than by a fixed list, so it returns
-one row per platform plus an overall row, in descending peak order. On the current data
-that is 11 rows:
+one row per platform plus an overall row, in descending peak order. On the sealed day
+that is 22 rows, the top ten of which are:
 
 | slice | occupancy_peak | instantaneous_peak | gap | gap_pct |
 | --- | --- | --- | --- | --- |
-| all platforms | 2692 | 2282 | 410 | 15.2 |
-| ANDROID_PHONE | 1704 | 1442 | 262 | 15.4 |
-| IPHONE | 329 | 263 | 66 | 20.1 |
-| SONY_ANDROID_TV | 279 | 246 | 33 | 11.8 |
-| JIO_ANDROID_TV | 210 | 186 | 24 | 11.4 |
-| Mweb | 67 | 53 | 14 | 20.9 |
-| SAMSUNG_HTML_TV | 52 | 48 | 4 | 7.7 |
-| ANDROID_TAB | 44 | 42 | 2 | 4.5 |
-| FIRE_TV | 38 | 32 | 6 | 15.8 |
-| XIAOMI_ANDROID_TV | 37 | 35 | 2 | 5.4 |
-| LG_HTML_TV | 22 | 21 | 1 | 4.5 |
+| all platforms | 22175 | 20003 | 2172 | 9.8 |
+| ANDROID_PHONE | 6513 | 5563 | 950 | 14.6 |
+| JIO_ANDROID_TV | 6490 | 6157 | 333 | 5.1 |
+| SONY_ANDROID_TV | 3308 | 3119 | 189 | 5.7 |
+| SAMSUNG_HTML_TV | 1171 | 1091 | 80 | 6.8 |
+| Web | 1017 | 949 | 68 | 6.7 |
+| FIRE_TV | 994 | 947 | 47 | 4.7 |
+| LG_HTML_TV | 906 | 857 | 49 | 5.4 |
+| IPHONE | 715 | 574 | 141 | 19.7 |
+| XIAOMI_ANDROID_TV | 689 | 652 | 37 | 5.4 |
 
-Three things to read at a glance. The `all platforms` row is 2,692, matching the
+Three things to read at a glance. The `all platforms` row is 22,175, matching the
 headline peak. The `occupancy_peak` column reproduces tile 4 exactly, platform for
 platform, so the two tiles are consistent by construction. And `gap` is positive
 everywhere, so minute occupancy never undercounts a true instantaneous count. On the
-larger slices `gap_pct` clusters between 11 and 21 percent; the small platforms drift
-lower simply because a handful of sessions rarely overlap awkwardly.
+larger slices `gap_pct` clusters between 5 and 15 percent; the small platforms swing
+wider simply because a handful of sessions rarely overlap awkwardly.
 
 ## When the dataset is replaced
 

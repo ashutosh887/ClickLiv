@@ -1,6 +1,6 @@
 # Scale
 
-Real peak concurrency here is 2,692, not the worked example's 300K, so judges will ask
+Real peak concurrency here is 22,175, not the worked example's 300K, so judges will ask
 how the design behaves at 100x. `make scale` answers with two measured proofs instead of
 an assertion, written to `evidence/scale.txt`.
 

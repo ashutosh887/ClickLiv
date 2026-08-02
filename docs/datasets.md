@@ -53,23 +53,22 @@ on that resolution staying correct.
 
 ## Verified against the live schema
 
-Run on 2026-08-01. Row counts and `sum(cityHash64(*))` content hashes matched on all
-eight tables, 1,357,842 rows in total.
+Re-verified 2026-08-02, after the sealed day replaced the tuning data in `clickliv` and
+the `coalesce(playing_signal, 0)` fix landed. `clickliv_sample` is a separate copy, not a
+live mirror of `clickliv`, so its own figures move only when `copy_dataset.sh` is re-run;
+they now reflect the fixed code.
 
-| figure | `marts` | `marts_clickliv_sample` |
+| figure | `marts` (sealed) | `marts_clickliv_sample` (tuning) |
 | --- | --- | --- |
-| foreground peak | 2,692 at 2026-07-26 10:56:00 UTC | 2,692 at 2026-07-26 10:56:00 UTC |
-| naive peak | 3,743 at 2026-07-26 10:59:00 UTC | 3,743 at 2026-07-26 10:59:00 UTC |
-| peak overcount | 39.0 percent | 39.0 percent |
-| average overcount | 49.0 percent | 49.0 percent |
-| `v_dimension_values` | 224 rows | 224 rows |
-| `v_titles` | 3,357 rows | 3,357 rows |
-| `v_naive_vs_foreground` | 5,255 rows | 5,255 rows |
+| foreground peak | 22,175 at 2026-07-31 11:16:00 UTC | 2,710 at 2026-07-26 10:56:00 UTC |
+| naive peak | 24,196 at 2026-07-31 11:16:00 UTC | 3,743 at 2026-07-26 10:59:00 UTC |
+| peak overcount | 9.1 percent | 38.1 percent |
+| average overcount | 90.1 percent | 45.9 percent |
 
 `v_data_window` on the copy reports 2026-07-14 15:43:00 to 2026-07-26 11:30:00 UTC,
-3,649 minutes carrying sessions over 96,818 occupancy rows.
+3,650 minutes carrying sessions over 98,034 occupancy rows.
 
-`marts_agent` reads `marts_clickliv_sample.v_overcount` and gets 2,692. The same user on
+`marts_agent` reads `marts_clickliv_sample.v_overcount` and gets 2,710. The same user on
 `clickliv_sample.minute_occupancy` is refused with code 497, so the copy inherits the
 least-privilege posture rather than opening a second way in.
 
