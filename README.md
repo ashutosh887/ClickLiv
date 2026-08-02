@@ -6,7 +6,7 @@ SonyLIV. Counting the crowd: foreground-only concurrency at streaming scale.
 
 ## Project
 
-**ClickLiv** — foreground-only concurrent viewers for SonyLIV streaming telemetry, on
+**ClickLiv**, foreground-only concurrent viewers for SonyLIV streaming telemetry, on
 ClickHouse.
 
 ## Team Members
@@ -39,15 +39,15 @@ server, all reading through one budgeted read-only role.
 
 ## Hosted Demo
 
-- **[clickliv.vercel.app](https://clickliv.vercel.app)** — the concurrency curve and its
+- **[clickliv.vercel.app](https://clickliv.vercel.app)**, the concurrency curve and its
   filters, reading `marts.v_concurrency` through a serverless proxy as the same restricted
   budgeted role every other consumer uses. No admin credential exists in that environment,
   and the API response says so in a `served_by` field.
-- **[librechat.15-252-63-157.sslip.io](https://librechat.15-252-63-157.sslip.io)** — ask for
+- **[librechat.15-252-63-157.sslip.io](https://librechat.15-252-63-157.sslip.io)**, ask for
   any of these numbers in plain language.
-- **[langfuse.15-252-63-157.sslip.io](https://langfuse.15-252-63-157.sslip.io)** — the LLM
+- **[langfuse.15-252-63-157.sslip.io](https://langfuse.15-252-63-157.sslip.io)**, the LLM
   traces, stored in this project's own ClickHouse Cloud service.
-- **[clickstack.15-252-63-157.sslip.io](https://clickstack.15-252-63-157.sslip.io)** — the
+- **[clickstack.15-252-63-157.sslip.io](https://clickstack.15-252-63-157.sslip.io)**, the
   pipeline traces. The starred **ClickLiv pipeline telemetry** dashboard is the panel worth
   opening.
 
