@@ -37,7 +37,7 @@
     font-size: 16px; cursor: pointer;
   }
   .mark em { font-style: normal; background: var(--yellow); padding: 0 3px; border-radius: 2px; }
-  .topbar nav { display: flex; gap: 20px; font-size: 13.5px; color: var(--muted); }
+  .topbar nav { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; font-size: 13.5px; color: var(--muted); }
   .topbar nav a { text-decoration: none; cursor: pointer; }
   .topbar nav a:hover { color: var(--ink); }
   .topbar nav a.gh { display: inline-flex; align-items: center; }
@@ -139,10 +139,31 @@
   .bar-at.off { color: var(--ink); }
   .bar-at.off b { background: var(--yellow); padding: 0 3px; border-radius: 2px; font-weight: 500; }
 
+  .source {
+    display: inline-flex; border: 1px solid var(--line); border-radius: 6px;
+    overflow: hidden; align-self: center;
+  }
+  .source button {
+    font: inherit; font-size: 12.5px; padding: 3px 10px; border: 0; cursor: pointer;
+    background: var(--bg); color: var(--muted);
+  }
+  .source button + button { border-left: 1px solid var(--line); }
+  .source button[aria-pressed="true"] { background: var(--yellow); color: var(--ink); font-weight: 560; }
+
+  .notice {
+    border: 1px solid var(--line); border-left: 3px solid var(--yellow);
+    border-radius: 8px; padding: 13px 16px; margin: 0 0 22px;
+    font-size: 13.5px; color: var(--muted); background: var(--soft);
+  }
+  .notice b { color: var(--ink); font-weight: 600; }
+
   footer {
     margin-top: 44px; color: var(--muted); font-size: 13px;
-    border-top: 1px solid var(--line); padding-top: 20px; max-width: 82ch;
+    border-top: 1px solid var(--line); padding-top: 20px;
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 16px 28px; flex-wrap: wrap;
   }
+  footer p { margin: 0; }
   @media (max-width: 620px) {
     h1 { font-size: 21px; }
     .bar-row { grid-template-columns: minmax(80px, 1fr) 1fr auto; }
@@ -161,6 +182,10 @@
       <a href="/#surfaces">Surfaces</a>
       <a href="/#limits">Limits</a>
       <a href="/dashboard">Dashboard</a>
+      <span class="source" role="group" aria-label="Data source">
+        <button type="button" id="useSnapshot" aria-pressed="true">Snapshot</button>
+        <button type="button" id="useLive" aria-pressed="false">Live</button>
+      </span>
       <a class="gh" href="https://github.com/ashutosh887/ClickLiv" aria-label="GitHub" title="GitHub"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></a>
     </nav>
   </div>
@@ -169,15 +194,16 @@
     <h1>Concurrency dashboard</h1>
     <p class="sub">Foreground-only concurrent viewers, filtered and bucketed by one parameterized
     view. A viewer counts only while playing, foregrounded and heartbeat-fresh. Every filter below
-    is a dimension the dataset actually carries, and every figure on this page is read live from
-    ClickHouse Cloud.</p>
+    is a dimension the dataset actually carries.</p>
   </header>
+
+  <p class="notice" id="notice"></p>
 
   <div class="stats">
     <div class="stat"><div class="k">Peak, this slice</div><div class="v"><mark id="peak">&hellip;</mark></div></div>
     <div class="stat"><div class="k">Naive peak, whole dataset</div><div class="v" id="naive">&hellip;</div></div>
     <div class="stat"><div class="k">Overcount, whole dataset</div><div class="v" id="overcount">&hellip;</div></div>
-    <div class="stat"><div class="k">Server time, this query</div><div class="v" id="served">&hellip;</div></div>
+    <div class="stat"><div class="k" id="servedKey">Query time</div><div class="v" id="served">&hellip;</div></div>
   </div>
 
   <div class="filters" id="filters"></div>
@@ -212,19 +238,29 @@
   </section>
 
   <footer>
-    Served by <code id="servedBy">marts.v_concurrency_full</code> as <code>marts_agent</code>, a
-    read-only role granted <code>SELECT</code> on the marts schema and nothing else, under a
-    server-enforced budget of 10 seconds, 2 GB and 200 million rows read per query. The role
-    cannot raise its own ceiling, and a write or a read outside marts is refused with
-    ClickHouse error 497. The browser never receives a database credential. Source at
-    <a href="https://github.com/ashutosh887/ClickLiv">github.com/ashutosh887/ClickLiv</a>.
+    <p id="footerSource"></p>
+    <p><code id="servedBy">marts.v_concurrency_full</code> &middot; MIT</p>
   </footer>
 </div>
 
 <script type="module">
+import * as frozen from './snapshot.js';
+
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n).toLocaleString('en-US');
 const stamp = (value) => String(value ?? '').slice(5, 16);
+const SOURCE_KEY = 'clickliv.source';
+const FROZEN = { datasets: frozen.datasets, dimensions: frozen.dimensions, concurrency: frozen.concurrency };
+
+let source = localStorage.getItem(SOURCE_KEY) === 'live' ? 'live' : 'snapshot';
+
+async function ask(route, search) {
+  if (source === 'snapshot') return FROZEN[route](Object.fromEntries(search || []));
+  const res = await fetch(`/api/${route}${search ? `?${search}` : ''}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
 const ORDER = ['platform', 'video_type', 'content_id', 'country', 'category',
   'audio_language', 'subtitle_language', 'video_resolution', 'show_name',
   'app_version', 'player_version'];
@@ -246,6 +282,15 @@ function show(node, visible) {
   node.classList.toggle('hidden', !visible);
 }
 
+function readLabel() {
+  return source === 'snapshot' ? 'rollup rows scanned in the browser' : 'rows read server side';
+}
+
+function millis(seconds) {
+  const ms = seconds * 1000;
+  return `${ms >= 10 ? fmt(Math.round(ms)) : ms.toFixed(1)} ms`;
+}
+
 function humanize(name) {
   const text = name.replace(/_/g, ' ');
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -258,9 +303,7 @@ function rank(name) {
 
 async function loadDatasets() {
   try {
-    const res = await fetch('/api/datasets');
-    if (!res.ok) return;
-    const data = await res.json();
+    const data = await ask('datasets');
     const rows = data.datasets || [];
     dataset = data.default || '';
     if (rows.length < 2) return;
@@ -457,16 +500,15 @@ function drawSlices(data) {
     + `overall is not the busiest minute for every slice. Highlighted times differ from the `
     + `peak of the current selection at ${stamp(overallPeakAt)} UTC.${scope}`;
   $('slicesStatus').textContent =
-    `${slices} slices read from ${data.schema}.v_concurrency_full`
-    + (data.rows_read ? `, ${fmt(data.rows_read)} rows read server side` : '');
+    `${slices} slices ${source === 'snapshot' ? 'recomputed from the snapshot of' : 'read from'} `
+    + `${data.schema}.v_concurrency_full`
+    + (data.rows_read ? `, ${fmt(data.rows_read)} ${readLabel()}` : '');
   show($('slices'), true);
 }
 
 async function loadCatalogue() {
   try {
-    const res = await fetch(`/api/dimensions?${params()}`);
-    if (!res.ok) return;
-    const data = await res.json();
+    const data = await ask('dimensions', params());
     if (!built) {
       windows = data.windows || [];
       if (!filters.window) filters.window = data.default_window || '';
@@ -548,13 +590,11 @@ function draw(rows, naive) {
 async function load() {
   $('status').textContent = 'Loading…';
   try {
-    const res = await fetch(`/api/concurrency?${params({ grain: filters.grain || 'hour' })}`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || res.statusText);
+    const data = await ask('concurrency', params({ grain: filters.grain || 'hour' }));
     $('peak').textContent = fmt(data.peak);
     if (data.schema) $('servedBy').textContent = `${data.schema}.v_concurrency_full`;
     const elapsed = data.statistics?.elapsed;
-    if (elapsed !== undefined) $('served').textContent = `${fmt(Math.round(elapsed * 1000))} ms`;
+    if (elapsed !== undefined) $('served').textContent = millis(elapsed);
     if (data.sql) {
       $('sqlText').textContent = data.sql;
       $('sqlParams').textContent = Object.entries(data.parameters || {})
@@ -568,7 +608,7 @@ async function load() {
     $('status').textContent =
       `${fmt(data.rows.length)} buckets at ${data.grain} grain on dataset ${data.dataset}`
       + (window ? `, ${window.label.toLowerCase()}` : '')
-      + (read ? `, ${fmt(read)} rows read server side` : '')
+      + (read ? `, ${fmt(read)} ${readLabel()}` : '')
       + (paired ? ', both curves over the same minutes' : '');
   } catch (error) {
     $('status').textContent = `Could not load: ${error.message}`;
@@ -588,9 +628,63 @@ $('clear').addEventListener('click', async () => {
   await Promise.all([loadCatalogue(), load()]);
 });
 
-await loadDatasets();
-await loadCatalogue();
-await load();
+async function describeSource() {
+  $('useSnapshot').setAttribute('aria-pressed', String(source === 'snapshot'));
+  $('useLive').setAttribute('aria-pressed', String(source === 'live'));
+  $('servedKey').textContent = source === 'snapshot' ? 'Browser time, this query' : 'Server time, this query';
+  if (source === 'live') {
+    $('notice').innerHTML = '<b>Live mode.</b> Every figure is read from a running ClickHouse '
+      + 'through <code>/api</code>. This deployment holds no credentials, so live mode only '
+      + 'answers when you are running the project yourself: <code>make up</code> then '
+      + '<code>make all</code>, then open <code>web/</code> against your own ClickHouse. '
+      + 'Switch back to Snapshot for the frozen dataset.';
+    return;
+  }
+  try {
+    const about = await frozen.about();
+    $('notice').innerHTML = '<b>Snapshot mode.</b> The hosted ClickHouse Cloud service was '
+      + `stopped after Click-a-thon 2026. This page is reading a snapshot of ${about.schema} `
+      + `captured ${about.captured_utc} UTC, ${fmt(about.rows)} rollup rows, and every number `
+      + 'below is recomputed in your browser from it. Filters, grains and slices all work. '
+      + 'Switch to Live to read a ClickHouse you are running yourself.';
+  } catch (error) {
+    $('notice').textContent = `The snapshot could not be loaded: ${error.message}`;
+  }
+}
+
+function footerNote() {
+  $('footerSource').textContent = source === 'snapshot'
+    ? 'Static snapshot, verified against the marts views at capture time. No database and no '
+      + 'credential in this deployment.'
+    : 'Live read as marts_agent, a read-only role under a server-enforced query budget.';
+}
+
+async function reload() {
+  built = false;
+  windows = [];
+  for (const key of Object.keys(filters)) delete filters[key];
+  filters.grain = 'hour';
+  dataset = '';
+  $('filters').replaceChildren();
+  $('peak').textContent = '…';
+  applied();
+  await describeSource();
+  footerNote();
+  await loadDatasets();
+  await loadCatalogue();
+  await load();
+}
+
+for (const [id, wanted] of [['useSnapshot', 'snapshot'], ['useLive', 'live']]) {
+  $(id).addEventListener('click', async () => {
+    if (source === wanted) return;
+    source = wanted;
+    localStorage.setItem(SOURCE_KEY, wanted);
+    await reload();
+  });
+}
+
+await reload();
 </script>
 </body>
 </html>

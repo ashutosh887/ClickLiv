@@ -11,10 +11,12 @@ import time
 from contextlib import nullcontext
 from pathlib import Path
 
-from . import otel
+from . import otel, websnapshot
 from .ch import ClickHouse
 
-SQL_DIR = Path(__file__).resolve().parents[2] / "sql"
+REPO = Path(__file__).resolve().parents[2]
+SQL_DIR = REPO / "sql"
+WEB_SNAPSHOT = REPO / "web" / "snapshot"
 
 DEFAULTS = {
     "CH_HOST": "localhost",
@@ -537,6 +539,12 @@ def step_reset(ch: ClickHouse) -> int:
     return 0
 
 
+def step_web_snapshot(ch: ClickHouse) -> int:
+    """Freeze the served marts into web/snapshot so the dashboard survives the service
+    being stopped. Read-only, and it refuses to write if the encoding disagrees with marts."""
+    return websnapshot.run(ch, WEB_SNAPSHOT, marts_database())
+
+
 STEPS = {
     "ping": step_ping,
     "schema": step_schema,
@@ -569,6 +577,7 @@ STEPS = {
     "unseen": step_unseen,
     "preflight": step_preflight,
     "snapshot": step_snapshot,
+    "web-snapshot": step_web_snapshot,
     "rollback": step_rollback,
     "mcp": step_mcp,
     "obs": step_obs,

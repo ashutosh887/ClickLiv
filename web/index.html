@@ -144,6 +144,7 @@
   }
   .step p { color: var(--muted); margin: 0; max-width: 76ch; }
 
+  .lede { color: var(--muted); max-width: 76ch; margin: -6px 0 18px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px; }
   .card {
     border: 1px solid var(--line); border-radius: 10px;
@@ -162,8 +163,11 @@
 
   footer {
     margin-top: 56px; color: var(--muted); font-size: 13px;
-    border-top: 1px solid var(--line); padding-top: 20px; max-width: 82ch;
+    border-top: 1px solid var(--line); padding-top: 20px;
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 16px 28px; flex-wrap: wrap;
   }
+  footer p { margin: 0; }
 
   .topbar nav a.gh { display: inline-flex; align-items: center; }
   .tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: 10px; }
@@ -451,34 +455,37 @@
   </section>
 
   <section id="surfaces">
-    <h2>Live surfaces</h2>
+    <h2>Surfaces</h2>
+    <p class="lede">The hosted deployments were stopped after the Click-a-thon, so nothing here
+    bills and no credential exists in production. The dashboard still works, from a snapshot of
+    the graded dataset captured before the service was stopped. Every other surface runs from a
+    clean clone with one command.</p>
     <div class="cards">
       <a class="card" href="/dashboard">
         <h3>Concurrency dashboard</h3>
-        <p>The curve and every filter, read live from ClickHouse through the same parameterized
-        view every other consumer uses. Proves the serving layer answers arbitrary slices at
-        minute grain.</p>
+        <p>The curve and every filter, over a frozen snapshot of the same parameterized view every
+        other consumer uses. Filters, grains and slices are recomputed in the browser. Toggle it to
+        live and it reads a ClickHouse you are running yourself.</p>
         <div class="host">clickliv.vercel.app/dashboard</div>
       </a>
-      <a class="card" href="https://librechat.15-252-63-157.sslip.io">
+      <a class="card" href="https://github.com/ashutosh887/ClickLiv#chat">
         <h3>LibreChat</h3>
         <p>Ask the same questions in plain language. Proves a warehouse is safe to point a model at,
         through pre-vetted MCP tools whose filter values are checked against the data itself.</p>
-        <div class="host">librechat.15-252-63-157.sslip.io</div>
+        <div class="host">make chat-up, then localhost:3080</div>
       </a>
-      <a class="card" href="https://langfuse.15-252-63-157.sslip.io">
+      <a class="card" href="https://github.com/ashutosh887/ClickLiv#observability">
         <h3>Langfuse</h3>
         <p>Every model and tool call traced. Proves the observability pillar is a second ClickHouse
-        workload, with traces in ClickHouse Cloud and transactional state in ClickHouse managed
-        Postgres.</p>
-        <div class="host">langfuse.15-252-63-157.sslip.io</div>
+        workload, with traces in ClickHouse and transactional state in Postgres.</p>
+        <div class="host">make llm-up, then localhost:3000</div>
       </a>
-      <a class="card" href="https://clickstack.15-252-63-157.sslip.io">
+      <a class="card" href="https://github.com/ashutosh887/ClickLiv#observability">
         <h3>ClickStack</h3>
         <p>One OpenTelemetry span per pipeline stage, per ingest and per query, carrying what the
         server itself recorded. Proves the latency figures are read from
         <code>system.query_log</code> rather than from a client stopwatch.</p>
-        <div class="host">clickstack.15-252-63-157.sslip.io</div>
+        <div class="host">make obs-up, then localhost:8080</div>
       </a>
       <a class="card" href="https://github.com/ashutosh887/ClickLiv">
         <h3>Source and evidence</h3>
@@ -533,25 +540,22 @@
   <section id="stack">
     <h2>Built on</h2>
     <div class="tools">
-      <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/clickhouse.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>ClickHouse Cloud</b><span>Every interval, rollup and served answer</span></div></div>
-      <div class="tool"><span class="mk mono">ch</span><div><b>chDB</b><span>The same numbers in process, no server</span></div></div>
-      <div class="tool"><span class="mk mono">CS</span><div><b>ClickStack</b><span>A span per stage, ingest and query</span></div></div>
-      <div class="tool"><span class="mk mono">Lf</span><div><b>Langfuse</b><span>Every model and tool call traced</span></div></div>
-      <div class="tool"><span class="mk mono">LC</span><div><b>LibreChat</b><span>The conversational surface</span></div></div>
-      <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@16.28.0/icons/modelcontextprotocol.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>MCP</b><span>Pre-vetted tools over curated marts</span></div></div>
-      <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/googlegemini.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>Google AI Studio</b><span>Gemini, the model behind the desk</span></div></div>
-      <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/amazonwebservices.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>AWS EC2</b><span>The box the self-hosted surfaces run on</span></div></div>
-      <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/caddy.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>Caddy</b><span>Real TLS on sslip.io, no domain bought</span></div></div>
-      <div class="tool"><img class="mk" src="https://cdn.jsdelivr.net/npm/simple-icons@13/icons/vercel.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>Vercel</b><span>This page and its reads, in Mumbai</span></div></div>
+      <div class="tool"><img class="mk" src="/logos/clickhouse.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>ClickHouse</b><span>Every interval, rollup and served answer</span></div></div>
+      <div class="tool"><img class="mk" src="/logos/clickhouse.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>chDB</b><span>The same numbers in process, no server</span></div></div>
+      <div class="tool"><img class="mk" src="/logos/clickhouse.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>ClickStack</b><span>A span per stage, ingest and query</span></div></div>
+      <div class="tool"><img class="mk" src="/logos/langfuse.png" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>Langfuse</b><span>Every model and tool call traced</span></div></div>
+      <div class="tool"><img class="mk" src="/logos/librechat.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>LibreChat</b><span>The conversational surface</span></div></div>
+      <div class="tool"><img class="mk" src="/logos/mcp.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>MCP</b><span>Pre-vetted tools over curated marts</span></div></div>
+      <div class="tool"><img class="mk" src="/logos/gemini.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>Google AI Studio</b><span>Gemini, the model behind the desk</span></div></div>
+      <div class="tool"><img class="mk" src="/logos/aws.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>AWS EC2</b><span>The box the self-hosted surfaces ran on</span></div></div>
+      <div class="tool"><img class="mk" src="/logos/caddy.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>Caddy</b><span>Real TLS on sslip.io, no domain bought</span></div></div>
+      <div class="tool"><img class="mk" src="/logos/vercel.svg" alt="" width="18" height="18" loading="lazy" decoding="async"><div><b>Vercel</b><span>This page, in Mumbai</span></div></div>
     </div>
   </section>
 
   <footer>
-    Built by DevSapiens for the ClickHouse Click-a-thon 2026, SonyLIV foreground-only concurrency
-    track. The figures in the result panel are read live from ClickHouse Cloud through a serverless
-    proxy authenticating as <code>marts_agent</code>, a read-only role with a query budget the
-    server enforces. No database credential reaches the browser and no admin credential exists in
-    that environment. Everything else on this page is prose about the method. MIT licensed.
+    <p>Built by DevSapiens for the ClickHouse Click-a-thon 2026, SonyLIV concurrency track.</p>
+    <p>Figures read from a verified snapshot. No credential in this deployment. MIT licensed.</p>
   </footer>
 </div>
 
@@ -596,28 +600,25 @@ function fill(data) {
     $('windowSpan').textContent = rollup;
   }
 
-  $('claimStatus').innerHTML =
-    `<span class="live">live</span> &nbsp;dataset <code>${data.dataset}</code>, read from`
-    + ` <code>${data.schema}.v_overcount</code> in ${fmt(data.server_ms)} ms of ClickHouse`
-    + ' server time.';
+  $('claimStatus').innerHTML = data.captured_utc
+    ? `<span class="live stale">snapshot</span> &nbsp;dataset <code>${data.dataset}</code>,`
+      + ` captured from <code>${data.schema}.v_overcount</code> on ${data.captured_utc} UTC,`
+      + ' before the hosted service was stopped.'
+    : `<span class="live">live</span> &nbsp;dataset <code>${data.dataset}</code>, read from`
+      + ` <code>${data.schema}.v_overcount</code> in ${fmt(data.server_ms)} ms of ClickHouse`
+      + ' server time.';
 }
 
 try {
-  const res = await fetch('/api/headline');
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || res.statusText);
-  fill(data);
+  const { headline } = await import('./snapshot.js');
+  fill(await headline());
 } catch (error) {
   for (const id of ['peakOver', 'avgOver', 'peak', 'naive', 'avg', 'window']) {
     $(id).textContent = 'unavailable';
   }
   $('claimStatus').innerHTML =
-    '<span class="live stale">not read</span> &nbsp;These figures are read live and the read did'
-    + ' not return, so nothing is shown in their place. The measured run is in the repository.';
-}
-
-for (const path of ['/api/datasets', '/api/dimensions', '/api/concurrency?grain=hour']) {
-  fetch(path, { cache: 'force-cache' }).catch(() => {});
+    '<span class="live stale">not read</span> &nbsp;The snapshot did not load, so nothing is'
+    + ' shown in its place. The measured run is in the repository.';
 }
 </script>
 </body>

@@ -90,6 +90,9 @@ scale:
 ui:
 	$(CLI) ui
 
+web-snapshot:
+	$(CLI) web-snapshot
+
 userlevel:
 	$(CLI) userlevel
 
