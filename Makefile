@@ -1,4 +1,6 @@
-CLI := uv run --quiet python -m clickliv
+DB_ENV := $(if $(DB),CH_DATABASE="$(DB)",)
+CLI := $(DB_ENV) uv run --quiet python -m clickliv
+EMBEDDED := $(DB_ENV) uv run --quiet --extra embedded python -m clickliv
 
 .PHONY: up down logs obs obs-up obs-down obs-logs ping schema load reconcile \
         sessionize occupancy deltas reference verify pipeline all gate-b gate-c \
@@ -65,13 +67,13 @@ gate-b:
 	$(CLI) gate-b
 
 gate-c:
-	uv run --quiet --extra embedded python -m clickliv gate-c
+	$(EMBEDDED) gate-c
 
 sweep:
 	$(CLI) sweep
 
 chdb:
-	uv run --quiet --extra embedded python -m clickliv chdb
+	$(EMBEDDED) chdb
 
 marts:
 	$(CLI) marts
@@ -83,7 +85,7 @@ projections:
 	$(CLI) projections
 
 scale:
-	uv run --quiet --extra embedded python -m clickliv scale
+	$(EMBEDDED) scale
 
 ui:
 	$(CLI) ui
@@ -112,32 +114,27 @@ claims:
 replay:
 	$(CLI) replay
 
-# The sealed-dataset run. See docs/unseen-day.md.
 unseen:
 	@test -n "$(RAW)" -a -n "$(CONTENT)" || { \
 	  echo "usage: make unseen RAW=<events csv> CONTENT=<content csv> [OUT=unseen] [DB=<database>] [CSV_RENAME=theirs=ours,...]"; \
 	  exit 2; }
 	RAW_CSV="$(RAW)" CONTENT_CSV="$(CONTENT)" \
 	UNSEEN_DIR="$(if $(OUT),$(OUT),unseen)" \
-	$(if $(CSV_RENAME),CSV_RENAME="$(CSV_RENAME)",) \
-	$(if $(DB),CH_DATABASE="$(DB)",) $(CLI) unseen
+	$(if $(CSV_RENAME),CSV_RENAME="$(CSV_RENAME)",) $(CLI) unseen
 
-# Read only. Everything checkable about a new pair of files, before anything is dropped.
 preflight:
 	@test -n "$(RAW)" -a -n "$(CONTENT)" || { \
 	  echo "usage: make preflight RAW=<events csv> CONTENT=<content csv> [CSV_RENAME=theirs=ours,...]"; \
 	  exit 2; }
 	RAW_CSV="$(RAW)" CONTENT_CSV="$(CONTENT)" \
-	$(if $(CSV_RENAME),CSV_RENAME="$(CSV_RENAME)",) \
-	$(if $(DB),CH_DATABASE="$(DB)",) $(CLI) preflight
+	$(if $(CSV_RENAME),CSV_RENAME="$(CSV_RENAME)",) $(CLI) preflight
 
 rollback:
-	$(if $(DB),CH_DATABASE="$(DB)",) $(CLI) rollback
+	$(CLI) rollback
 
 unseen-fixture:
 	uv run --quiet python tools/make_unseen_fixture.py
 
-# The same fresh day in every container and CSV quirk the organizers might ship.
 unseen-variants:
 	uv run --quiet python tools/make_unseen_fixture.py --variants $(if $(DIR),$(DIR),/tmp/clickliv-variants)
 
@@ -163,7 +160,7 @@ chat-logs:
 	docker compose --profile chat logs -f librechat
 
 test:
-	uv run --quiet python -m unittest discover -s tests -v
+	uv run --quiet --extra embedded python -m unittest discover -s tests -v
 
 data:
 	uv run --quiet python tools/fetch_data.py

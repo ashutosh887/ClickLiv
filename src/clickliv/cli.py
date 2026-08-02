@@ -157,9 +157,8 @@ def step_sessionize(ch: ClickHouse) -> int:
 
     print(f"\nFAIL  sessionize produced {int(shape['intervals']):,} active interval(s) "
           f"from {int(shape['events']):,} events in {sessions:,} sessions")
-    print(f"      {active:,} of {sessions:,} sessions ({ratio:.1%}) are ever active. "
-          f"The tuning data measures 99.97% and its busiest single day 99.95%, so this "
-          f"run trips below {MIN_ACTIVE_SESSION_RATIO:.0%}.")
+    print(f"      {active:,} of {sessions:,} sessions ({ratio:.1%}) are ever active, "
+          f"under the {MIN_ACTIVE_SESSION_RATIO:.0%} this step requires.")
     print("      That bound is a heuristic, not a proof: passing it means the event "
           "vocabulary was recognised, not that the answers are right. Gate A is what "
           "checks the answers.")
@@ -258,9 +257,18 @@ def step_chdb(ch: ClickHouse) -> int:
     return 0 if chdb_engine.run(ch, render, SQL_DIR, artifacts_dir()) else 1
 
 
+DATABASE_NAME = re.compile(r"\A[A-Za-z_][A-Za-z0-9_]{0,62}\Z")
+
+
 def marts_database() -> str:
-    """Only the normal database owns the `marts` name, so a scratch run cannot rebind it."""
+    """Only the default database owns the bare `marts` name, so a scratch run cannot
+    rebind, drop or grant against the surface the live demo reads."""
     database = os.environ.get("CH_DATABASE", DEFAULTS["CH_DATABASE"])
+    if not DATABASE_NAME.match(database):
+        raise SystemExit(
+            f"CH_DATABASE={database!r} is not a plain identifier. It names the database "
+            f"this run drops and rebuilds, and it is interpolated into DDL, so it has to "
+            f"be a letter or underscore followed by letters, digits and underscores.")
     if database == DEFAULTS["CH_DATABASE"]:
         return "marts"
     return f"marts_{database}"
@@ -350,8 +358,8 @@ def step_preflight(ch: ClickHouse) -> int:
                 rows = int(ch.scalar(f"SELECT count() FROM {table}"))
                 print(f"{ch.config.database}.{table} holds {rows:,} rows right now, "
                       f"and this run replaces them")
-    except ClickHouseError:
-        pass
+    except (ClickHouseError, OSError) as exc:
+        print(f"could not read the current row counts from {ch.config.host}: {exc}")
     return 0 if ok else 1
 
 
@@ -574,6 +582,7 @@ def main(argv: list[str]) -> int:
         print(f"commands: {', '.join(STEPS)}, sql")
         return 2
     command, args = argv[0], argv[1:]
+    marts_database()
     ch = ClickHouse()
 
     if command == "sql":

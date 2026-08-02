@@ -13,12 +13,10 @@ BASELINE = Path("artifacts/claims_baseline.json")
 DOCS = ["README.md", "docs", "localdocs/script.md", "web/index.html"]
 
 
-def marts_db(database: str) -> str:
-    return "marts" if database == "clickliv" else f"marts_{database}"
-
-
 def measure(ch: ClickHouse) -> dict:
-    marts = marts_db(ch.config.database)
+    from .cli import marts_database
+
+    marts = marts_database()
     out: dict[str, float | int | str] = {}
 
     row = ch.query(f"SELECT * FROM {marts}.v_overcount").dicts()[0]
