@@ -1,27 +1,38 @@
 -- read cost of the served concurrency query as a function of filter count
 -- every read_rows below is system.query_log.read_rows, looked up by a query_id
 -- the client generated before the query ran. No client wall clock, no estimates.
+-- re-measured 2026-08-02 against the sample dataset in clickliv on ClickHouse Cloud.
 
 raw_events            905,558 rows
 minute_occupancy       96,818 rows
 
 naive baseline, the same answer computed straight off the events with no rollup:
   SELECT max(c) FROM (SELECT minute, count() AS c FROM (SELECT video_session_id, toUInt32(toUnixTimestamp64Milli(event_time) DIV 60000) AS minute FROM raw_events WHERE event_type != '' GROUP BY video_session_id, minute) GROUP BY minute)
-  read_rows 905,558  (query_id 3c28b628-b2c7-490b-998d-2aec61fe97ad)
+  read_rows 905,558  (query_id 4008fe9d-f6c9-43be-89a0-d06aa28a8208)
 
-served through marts.v_concurrency_full, adding one dimension filter at a time:
+served through marts.v_concurrency_full, adding one dimension filter at a time. The
+filters are applied in sort key order with the values country=india,
+platform=ANDROID_PHONE, video_type=live, category=cdbgg, app_version=6.34.8,
+player_version=1.8.2, audio_language=eng, subtitle_language=UNK:
 
  filters   read_rows   vs naive    ms  query_id
-       0      97,043      9.33x    56  22c16745-ea3b-461f-8f80-3eef1fdcec12
-       1      97,493      9.29x    61  7482a024-777a-4a03-9cd4-3cdfdf036473
-       2      97,943      9.25x    66  3ff4dba4-9f6b-485a-8f66-bfaae439b77b
-       3      98,168      9.22x    87  f251937c-580f-4560-a447-b778482a3aca
-       5      98,393      9.20x    70  ea1c9e1a-4f76-4fd7-a543-09df26656f1b
-       8      98,393      9.20x    70  f43a0aa0-fe5b-4225-9e00-e157d7d46a0a
+       0      97,043      9.33x    56  92558111-dfc6-4328-a187-aa98f8e647d1
+       1      97,493      9.29x    73  8eeeb2b9-fd0d-4f0c-a1f1-9c0ddd62b67e
+       2      97,943      9.25x    66  1af2a83c-a3c8-4a9c-a9a5-038fe674fa85
+       3      98,168      9.22x    69  70b9c938-c862-4bb8-8da3-aff50710c33f
+       5      99,068      9.14x    78  e28b65b9-1a28-4732-abe9-831de5927c5c
+       8      99,968      9.06x    88  3daac384-4261-4ced-8f0d-6a4a0468fbdc
 
 The advantage is flat in the number of filters because marts.dimension_value
 holds the distinct value of each dimension, so the case-fold fallback in
 sql/06_marts.sql resolves against that small table instead of rescanning the
-fact table once per predicate. Before that table existed each added filter cost
-a further full scan of minute_occupancy and the advantage decayed toward 1x.
+fact table once per predicate. dimension_value carries 225 rows and each resolved
+filter reads it twice, so eight filters cost 2,925 rows more than none rather
+than another pass over the fact table each.
+
+Before that table existed the same eight-filter query read 871,362 rows, which is
+exactly nine passes over the 96,818 row serving table, and the advantage decayed
+toward 1x. That measurement is still recoverable from this service's query log:
+the query finished at 2026-08-01 18:52:00 reading 871,362 rows.
+
 Re-run this file's queries by query_id to check any row of it.

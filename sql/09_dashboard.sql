@@ -17,24 +17,21 @@ FROM marts.v_naive_vs_foreground
 ORDER BY minute;
 
 -- name: concurrency_over_time
--- Reads the plain view rather than the parameterized v_occupancy_minute. A console
--- dashboard tile renders the parameterized call as Forbidden, while the same query
--- succeeds for both the admin user and marts_agent, so the restriction is the console
--- runner's rather than ours. Checked row for row: both forms return 3,649 rows peaking
--- at 2,692 on 2026-07-26 10:56 UTC.
---
--- The general rule this establishes, and it binds every query in this file: nothing in
--- a FROM or JOIN may be an identifier followed by an argument list. A parameterized view
--- call and a table function are the same shape to whatever parses the query on the way
--- to a tile, and that shape is refused before the request reaches the server, which is
--- why system.query_log holds no trace of the failure. Subqueries and CTEs are fine, as
--- occupancy_vs_instantaneous below relies on. verify_dashboard.sh enforces this.
 SELECT
     minute_utc AS ts,
     foreground_concurrency AS concurrency
 FROM marts.v_naive_vs_foreground
 WHERE foreground_concurrency > 0
 ORDER BY minute_utc;
+
+-- name: dimensions_available
+SELECT
+    dimension,
+    count() AS distinct_values,
+    arrayStringConcat(arraySlice(arraySort(groupArray(value)), 1, 5), ', ') AS first_values
+FROM marts.v_dimension_values
+GROUP BY dimension
+ORDER BY distinct_values DESC, dimension;
 
 -- name: peak_by_platform
 SELECT
@@ -65,34 +62,25 @@ GROUP BY video_type
 ORDER BY peak_concurrency DESC;
 
 -- name: serving_latency
--- This used to read clusterAllReplicas(default, system.query_log), because on Cloud the
--- query log is per replica and a plain read sees roughly half the evidence. But
--- clusterAllReplicas is a table function, which is exactly the shape the tile runner
--- refuses, so on a dashboard it would have failed the same way the parameterized view
--- did. Reading the local log is the version that renders.
---
--- What that costs and how it is paid back: the latency columns describe whichever
--- replica the console routed to rather than both, so replicas_in_service comes from
--- system.clusters, a plain table, to keep the size of the service on the tile. The two
--- replicas are not meaningfully different, which was measured rather than assumed:
--- 584 and 596 queries, p50 29 ms on both, p95 71 and 72 ms.
---
--- Use the clusterAllReplicas form when running this by hand outside the console, where
--- table functions are allowed and the pooled numbers are the better ones.
 SELECT
-    hostName() AS replica,
-    (SELECT count() FROM system.clusters WHERE cluster = 'default') AS replicas_in_service,
+    if(query ILIKE '%UNION ALL%', 'multi slice batch', 'single slice serve') AS query_shape,
     count() AS queries,
     quantileExact(0.50)(query_duration_ms) AS p50_ms,
     quantileExact(0.95)(query_duration_ms) AS p95_ms,
     quantileExact(0.99)(query_duration_ms) AS p99_ms,
-    max(query_duration_ms) AS max_ms,
-    max(read_rows) AS max_read_rows
+    round(100 * countIf(query_duration_ms <= 100) / count(), 1) AS pct_within_100ms,
+    max(read_rows) AS max_read_rows,
+    hostName() AS replica,
+    (SELECT count() FROM system.clusters WHERE cluster = 'default') AS replicas_in_service,
+    min(event_time) AS log_from,
+    max(event_time) AS log_to
 FROM system.query_log
 WHERE type = 'QueryFinish'
   AND is_initial_query = 1
   AND query NOT ILIKE '%system.query_log%'
-  AND (query ILIKE '%marts.v_concurrency%' OR query ILIKE '%marts.v_occupancy_minute%');
+  AND (query ILIKE '%marts.v_concurrency%' OR query ILIKE '%marts.v_occupancy%')
+GROUP BY query_shape, replica, replicas_in_service
+ORDER BY queries DESC;
 
 -- name: occupancy_vs_instantaneous
 WITH pieces AS

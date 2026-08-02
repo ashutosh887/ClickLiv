@@ -24,7 +24,8 @@ if ! python3 - "$WORK" <<'PY'
 import re, sys, pathlib
 found = []
 for path in sorted(pathlib.Path(sys.argv[1]).iterdir()):
-    for name in re.findall(r'\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_.]*)\s*\(', path.read_text(), re.I):
+    for name in re.findall(r'\b(?:FROM|JOIN)\s+`?([A-Za-z_][A-Za-z0-9_.]*)`?\s*\(',
+                           path.read_text(), re.I):
         found.append((path.name, name))
 for query, name in found:
     print(f'{query:<28} FAIL  {name}() in FROM or JOIN, the console dashboard runner refuses that shape')
