@@ -43,18 +43,36 @@ def run(ch: ClickHouse, evidence: Path) -> bool:
     query_id = str(uuid.uuid4())
     ch.query(query, query_id=query_id)
     rows = ch.query_log_rows("projections, read_rows", [query_id])
+    if not rows:
+        print(f"FAIL  system.query_log has no row for {query_id}, so nothing here is "
+              f"evidence of anything")
+        return False
     used = (rows[0]["projections"], rows[0]["read_rows"])
 
+    base_reads = PROJECTION not in before
+    planner_picks = PROJECTION in after
+    logged = PROJECTION in str(used[0])
+    ok = base_reads and planner_picks and logged
+
+    verdict = (f"the planner picks {PROJECTION} on its own" if planner_picks else
+               f"the planner did NOT pick {PROJECTION}; this evidence does not hold")
     text = (
         f"-- query: {query}\n"
         f"-- content_id {content_id} chosen as the busiest, {ch.scalar(f'SELECT count() FROM minute_occupancy WHERE content_id = {content_id}')} rows\n\n"
-        f"-- before, optimize_use_projections = 0, reads the base table\n{before}\n\n"
-        f"-- after, default settings, the planner picks {PROJECTION} on its own\n{after}\n\n"
+        f"-- before, optimize_use_projections = 0, "
+        f"{'reads the base table' if base_reads else 'unexpectedly still names the projection'}"
+        f"\n{before}\n\n"
+        f"-- after, default settings, {verdict}\n{after}\n\n"
         f"-- forced, force_optimize_projection_name = '{PROJECTION}'\n{forced}\n\n"
         f"-- system.query_log for the query above: projections={used[0]}, "
         f"read_rows={used[1]}\n"
+        f"-- checked: the base plan does not name the projection ({base_reads}), the "
+        f"default plan does ({planner_picks}), and query_log confirms it ran ({logged})\n"
     )
     (evidence / "projections.txt").write_text(text)
-    print(f"evidence/projections.txt        content_id {content_id}, "
+    print(f"{'PASS' if ok else 'FAIL'}  evidence/projections.txt  content_id {content_id}, "
           f"query_log.projections={used[0]}")
-    return True
+    if not ok:
+        print(f"      base plan clean {base_reads}, default plan picks it {planner_picks}, "
+              f"query_log confirms it {logged}")
+    return ok

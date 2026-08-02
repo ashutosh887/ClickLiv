@@ -48,7 +48,21 @@ def run(ch: ClickHouse, evidence: Path) -> bool:
     sessions = int(peak["sessions"])
     users_exact = int(peak["users_exact"])
     users_approx = int(peak["users_approx"])
+    if not users_exact:
+        print("FAIL  the peak minute resolves to zero distinct user_ids, so there is "
+              "nothing to compare session-level against")
+        return False
     error_pct = 100 * abs(users_approx - users_exact) / users_exact
+
+    exact_match = users_approx == users_exact
+    bounded = users_exact <= sessions
+    ok = exact_match and bounded
+    reading = ("uniq matches uniqExact exactly at this cardinality, so uniqState/uniqMerge "
+               "is a safe, bounded choice if user-level concurrency is ever served."
+               if exact_match else
+               f"uniq is off uniqExact by {abs(users_approx - users_exact):,} at this "
+               f"cardinality, so the HyperLogLog estimate is no longer exact here and the "
+               f"claim above has to be restated before it is served.")
 
     text = (
         f"-- O4: session-level vs user-level concurrency, at the peak minute\n"
@@ -65,11 +79,14 @@ def run(ch: ClickHouse, evidence: Path) -> bool:
         f"reading: {sessions - users_exact:,} of the peak's {sessions:,} sessions are a\n"
         f"second device on an account already counted, so user-level concurrency is\n"
         f"{100 * (sessions / users_exact - 1):.1f}% lower than session-level at the peak.\n"
-        f"uniq matches uniqExact exactly at this cardinality, so uniqState/uniqMerge is\n"
-        f"a safe, bounded choice if user-level concurrency is ever served.\n"
+        f"{reading}\n\n"
+        f"checked: uniq equals uniqExact ({exact_match}), and distinct users never exceed\n"
+        f"distinct sessions at the peak ({bounded}).\n"
     )
     (evidence / "user_level.txt").write_text(text)
-    print(f"evidence/user_level.txt         sessions={sessions:,} "
+    print(f"{'PASS' if ok else 'FAIL'}  evidence/user_level.txt  sessions={sessions:,} "
           f"users_exact={users_exact:,} users_approx={users_approx:,} "
           f"({error_pct:.2f}% error)")
-    return True
+    if not ok:
+        print(f"      uniq == uniqExact {exact_match}, users <= sessions {bounded}")
+    return ok

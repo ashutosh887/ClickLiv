@@ -136,11 +136,13 @@ def run(ch: ClickHouse, evidence: Path) -> bool:
                  f"({unfiltered:,}) equals the raw half open sweep over active_intervals "
                  f"({anchor:,}), which Gate A pins to the independent python reference. "
                  "Clipping and merging therefore adds dimensions without moving the number.")
+    strictly_lower = sum(1 for r in rows if r[2] < r[1])
     lines.append("")
-    lines.append("reading: instantaneous is strictly lower on every slice, so the two readings of "
-                 "O3 are not interchangeable and the choice has to be stated, not assumed. Both "
-                 "are now computable per slice, so whichever reading the private ground truth "
-                 "uses, the number is available.")
+    lines.append(f"reading: instantaneous is strictly lower on {strictly_lower} of "
+                 f"{len(rows)} slices, so the two readings of O3 are not interchangeable "
+                 "and the choice has to be stated, not assumed. Both are now computable "
+                 "per slice, so whichever reading the private ground truth uses, the "
+                 "number is available.")
 
     path = evidence / "instantaneous_vs_occupancy.txt"
     path.write_text("\n".join(lines) + "\n")

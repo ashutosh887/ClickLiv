@@ -39,7 +39,7 @@ CALL_ARGS = (
 )
 
 
-def marts(ch: ClickHouse) -> str:
+def marts() -> str:
     """A scratch run must answer from its own marts, never from the primary one."""
     from .cli import marts_database
     return marts_database()
@@ -61,7 +61,7 @@ def run_benchmark(ch: ClickHouse, spec: dict, minute_from: int, minute_to: int) 
         f"SELECT max(peak_concurrency) AS peak, "
         f"sum(average_concurrency * minutes_in_bucket) / sum(minutes_in_bucket) AS avg, "
         f"sum(minutes_in_bucket) AS active_minutes "
-        f"FROM {marts(ch)}.v_concurrency({args})", query_id=query_id).rows[0]
+        f"FROM {marts()}.v_concurrency({args})", query_id=query_id).rows[0]
     peak, avg, active_minutes = rows
     return {
         "query_label": spec["label"],
@@ -113,7 +113,7 @@ def write_csv(path: Path, rows: list[dict]) -> None:
 def capture_explain(ch: ClickHouse, spec: dict, minute_from: int, minute_to: int,
                      evidence: Path) -> None:
     args = CALL_ARGS.format(**spec, minute_from=minute_from, minute_to=minute_to)
-    query = f"SELECT * FROM {marts(ch)}.v_concurrency({args})"
+    query = f"SELECT * FROM {marts()}.v_concurrency({args})"
     plan = ch.query(f"EXPLAIN indexes = 1 {query}").rows
     text = "-- EXPLAIN indexes = 1\n" + "\n".join(r[0] for r in plan)
     try:
@@ -135,18 +135,46 @@ def run(ch: ClickHouse, artifacts: Path, answers_dir: Path = Path("answers"),
 
     write_csv(answers_dir / "benchmark_answers.csv", [
         {k: v for k, v in r.items() if k != "query_id"} for r in results])
-    write_csv(answers_dir / "latencies.csv", query_log_rows(
-        ch, [r["query_id"] for r in results]))
+    logged = query_log_rows(ch, [r["query_id"] for r in results])
+    write_csv(answers_dir / "latencies.csv", logged)
 
     representative = next(s for s in BENCHMARKS if s["label"] == EVIDENCE_LABEL)
     capture_explain(ch, representative, minute_from, minute_to, evidence_dir)
-    write_csv(evidence_dir / "query_log.csv", query_log_rows(
-        ch, [r["query_id"] for r in results]))
-    write_csv(evidence_dir / "oracle_match.csv", [oracle_match(ch, artifacts)])
+    write_csv(evidence_dir / "query_log.csv", logged)
+    oracle = oracle_match(ch, artifacts)
+    write_csv(evidence_dir / "oracle_match.csv", [oracle])
 
     print(f"{answers_dir}/benchmark_answers.csv   {len(results)} rows")
-    print(f"{answers_dir}/latencies.csv           {len(results)} rows")
-    print(f"{evidence_dir}/query_log.csv          {len(results)} rows")
+    print(f"{answers_dir}/latencies.csv           {len(logged)} rows")
+    print(f"{evidence_dir}/query_log.csv          {len(logged)} rows")
     print(f"{evidence_dir}/explain_{EVIDENCE_LABEL}.txt")
     print(f"{evidence_dir}/oracle_match.csv       1 row")
-    return True
+    return check(results, logged, oracle)
+
+
+def check(results: list[dict], logged: list[dict], oracle: dict) -> bool:
+    """The docstring's own claim, enforced: every answer traceable to a query_log row, and
+    the unfiltered day peak equal to the peak the serving tables hold."""
+    missing = [r["query_label"] for r in results
+               if r["query_id"] not in {row["query_id"] for row in logged}]
+    unfiltered = next(r for r in results if r["query_label"] == EVIDENCE_LABEL)
+    peak_matches = unfiltered["peak_concurrency"] == oracle["occupancy_peak"]
+    reference_peak = oracle["python_reference_peak_concurrency"]
+    reference_matches = (not reference_peak
+                         or int(reference_peak) == unfiltered["peak_concurrency"])
+
+    if missing:
+        print(f"\nFAIL  {len(missing)} of {len(results)} answers have no system.query_log "
+              f"row, so they are not traceable: {', '.join(missing)}")
+    if not peak_matches:
+        print(f"\nFAIL  {EVIDENCE_LABEL} answers {unfiltered['peak_concurrency']:,} but "
+              f"minute_occupancy peaks at {oracle['occupancy_peak']:,}. The marts view and "
+              f"the table it reads disagree.")
+    if not reference_matches:
+        print(f"\nFAIL  {EVIDENCE_LABEL} answers {unfiltered['peak_concurrency']:,} but the "
+              f"python reference says {reference_peak}")
+    ok = not missing and peak_matches and reference_matches
+    print(f"answers: {'PASS' if ok else 'FAIL'}  {len(logged)}/{len(results)} traceable, "
+          f"unfiltered peak {unfiltered['peak_concurrency']:,} matches the serving tables "
+          f"{peak_matches} and the python reference {reference_matches}")
+    return ok
