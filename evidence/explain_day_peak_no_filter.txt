@@ -12,24 +12,24 @@ Expression ((Project names + (Projection + (Change column names to column identi
                   Partition Min-Max
                     Keys:
                       minute
-                    Condition: and((minute in (-Inf, 29751090]), (minute in [29734063, +Inf)))
-                    Parts: 7/7
-                    Granules: 17/17
+                    Condition: and((minute in (-Inf, 29762606]), (minute in [23667511, +Inf)))
+                    Parts: 96/96
+                    Granules: 180/180
                   Partition
                     Condition: true
-                    Parts: 7/7
-                    Granules: 17/17
+                    Parts: 96/96
+                    Granules: 180/180
                   PrimaryKey
                     Keys:
                       minute
-                    Condition: and((minute in (-Inf, 29751090]), (minute in [29734063, +Inf)))
-                    Parts: 7/7
-                    Granules: 17/17
+                    Condition: and((minute in (-Inf, 29762606]), (minute in [23667511, +Inf)))
+                    Parts: 96/96
+                    Granules: 180/180
                     Search Algorithm: binary search
-                  Ranges: 7
+                  Ranges: 96
 
--- EXPLAIN ANALYZE unavailable on this server (runnable EXPLAIN ANALYZE needs ClickHouse 26.7+): 400 on query 5f51409e-83fd-4b62-a132-28b49aadbaf1
-Code: 62. DB::Exception: Syntax error: failed at position 17 (SELECT) (line 1, col 17): SELECT * FROM marts.v_concurrency(grain_minutes = 1440, country = '', platform = '', video_type = '', content_id = 0, minute_from = 29734063, minute_to = 297510... Expected one of: token sequence, Dot, token, Equals. (SYNTAX_ERROR) (version 26.4.1.2029 (official build))
+-- EXPLAIN ANALYZE unavailable on this server (runnable EXPLAIN ANALYZE needs ClickHouse 26.7+): 400 on query 292b23d0-7a5e-4baa-a7f8-b54177838eb2
+Code: 62. DB::Exception: Syntax error: failed at position 17 (SELECT) (line 1, col 17): SELECT * FROM marts.v_concurrency(grain_minutes = 1440, country = '', platform = '', video_type = '', content_id = 0, minute_from = 23667511, minute_to = 297626... Expected one of: token sequence, Dot, token, Equals. (SYNTAX_ERROR) (version 26.4.1.2029 (official build))
 ---
-EXPLAIN ANALYZE SELECT * FROM marts.v_concurrency(grain_minutes = 1440, country = '', platform = '', video_type = '', content_id = 0, minute_from = 29734063, minute_to = 29751090)
+EXPLAIN ANALYZE SELECT * FROM marts.v_concurrency(grain_minutes = 1440, country = '', platform = '', video_type = '', content_id = 0, minute_from = 23667511, minute_to = 29762606)
 FORMAT JSONCompact

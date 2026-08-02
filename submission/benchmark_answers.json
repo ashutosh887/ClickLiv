@@ -6,12 +6,12 @@
     "platform": "",
     "video_type": "",
     "content_id": 0,
-    "minute_from": 29734063,
-    "minute_to": 29751090,
-    "peak_concurrency": 2692,
-    "average_concurrency": 34.8339,
+    "minute_from": 23667511,
+    "minute_to": 29762606,
+    "peak_concurrency": 22175,
+    "average_concurrency": 313.4852,
     "average_denominator": "active minutes (minute_occupancy has no zero rows)",
-    "active_minutes": 3649
+    "active_minutes": 4145
   },
   {
     "query_label": "hour_peak_no_filter",
@@ -20,12 +20,12 @@
     "platform": "",
     "video_type": "",
     "content_id": 0,
-    "minute_from": 29734063,
-    "minute_to": 29751090,
-    "peak_concurrency": 2692,
-    "average_concurrency": 34.8339,
+    "minute_from": 23667511,
+    "minute_to": 29762606,
+    "peak_concurrency": 22175,
+    "average_concurrency": 313.4852,
     "average_denominator": "active minutes (minute_occupancy has no zero rows)",
-    "active_minutes": 3649
+    "active_minutes": 4145
   },
   {
     "query_label": "minute_peak_no_filter",
@@ -34,12 +34,12 @@
     "platform": "",
     "video_type": "",
     "content_id": 0,
-    "minute_from": 29734063,
-    "minute_to": 29751090,
-    "peak_concurrency": 2692,
-    "average_concurrency": 34.8339,
+    "minute_from": 23667511,
+    "minute_to": 29762606,
+    "peak_concurrency": 22175,
+    "average_concurrency": 313.4852,
     "average_denominator": "active minutes (minute_occupancy has no zero rows)",
-    "active_minutes": 3649
+    "active_minutes": 4145
   },
   {
     "query_label": "day_peak_platform_android_phone",
@@ -48,12 +48,12 @@
     "platform": "ANDROID_PHONE",
     "video_type": "",
     "content_id": 0,
-    "minute_from": 29734063,
-    "minute_to": 29751090,
-    "peak_concurrency": 1704,
-    "average_concurrency": 23.7225,
+    "minute_from": 23667511,
+    "minute_to": 29762606,
+    "peak_concurrency": 6513,
+    "average_concurrency": 110.4927,
     "average_denominator": "active minutes (minute_occupancy has no zero rows)",
-    "active_minutes": 3561
+    "active_minutes": 3286
   },
   {
     "query_label": "day_peak_platform_sony_android_tv",
@@ -62,12 +62,12 @@
     "platform": "SONY_ANDROID_TV",
     "video_type": "",
     "content_id": 0,
-    "minute_from": 29734063,
-    "minute_to": 29751090,
-    "peak_concurrency": 279,
-    "average_concurrency": 90.9832,
+    "minute_from": 23667511,
+    "minute_to": 29762606,
+    "peak_concurrency": 3308,
+    "average_concurrency": 467.6798,
     "average_denominator": "active minutes (minute_occupancy has no zero rows)",
-    "active_minutes": 119
+    "active_minutes": 406
   },
   {
     "query_label": "day_peak_video_type_live",
@@ -76,12 +76,12 @@
     "platform": "",
     "video_type": "live",
     "content_id": 0,
-    "minute_from": 29734063,
-    "minute_to": 29751090,
-    "peak_concurrency": 425,
-    "average_concurrency": 257.6,
+    "minute_from": 23667511,
+    "minute_to": 29762606,
+    "peak_concurrency": 10314,
+    "average_concurrency": 797.3458,
     "average_denominator": "active minutes (minute_occupancy has no zero rows)",
-    "active_minutes": 65
+    "active_minutes": 668
   },
   {
     "query_label": "day_peak_iphone_india",
@@ -90,12 +90,12 @@
     "platform": "IPHONE",
     "video_type": "",
     "content_id": 0,
-    "minute_from": 29734063,
-    "minute_to": 29751090,
-    "peak_concurrency": 329,
-    "average_concurrency": 19.0,
+    "minute_from": 23667511,
+    "minute_to": 29762606,
+    "peak_concurrency": 715,
+    "average_concurrency": 49.2516,
     "average_denominator": "active minutes (minute_occupancy has no zero rows)",
-    "active_minutes": 763
+    "active_minutes": 771
   },
   {
     "query_label": "day_peak_vod_mweb",
@@ -104,11 +104,11 @@
     "platform": "Mweb",
     "video_type": "vod",
     "content_id": 0,
-    "minute_from": 29734063,
-    "minute_to": 29751090,
-    "peak_concurrency": 62,
-    "average_concurrency": 34.6167,
+    "minute_from": 23667511,
+    "minute_to": 29762606,
+    "peak_concurrency": 75,
+    "average_concurrency": 45.15,
     "average_denominator": "active minutes (minute_occupancy has no zero rows)",
-    "active_minutes": 60
+    "active_minutes": 80
   }
 ]
