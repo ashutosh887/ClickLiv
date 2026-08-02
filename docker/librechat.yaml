@@ -19,7 +19,6 @@ modelSpecs:
       showIconInHeader: false
       mcpServers:
         - clickliv-marts
-        - clickhouse-official
       conversation_starters:
         - 'What has been the most busiest time?'
         - 'How much would we overcount by counting every open session instead of only foreground ones?'

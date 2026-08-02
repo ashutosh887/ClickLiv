@@ -1,0 +1,59 @@
+-- query: SELECT sum(sessions) FROM minute_occupancy WHERE content_id = 2078157818
+-- content_id 2078157818 chosen as the busiest, 2001 rows
+
+-- before, optimize_use_projections = 0, reads the base table
+Expression ((Project names + Projection))
+  Aggregating
+    Expression (Before GROUP BY)
+      Expression ((WHERE + Change column names to column identifiers))
+        ReadFromMergeTree (clickliv_sample.minute_occupancy)
+        Indexes:
+          Partition Min-Max
+            Condition: true
+            Parts: 7/7
+            Granules: 17/17
+          Partition
+            Condition: true
+            Parts: 7/7
+            Granules: 17/17
+          PrimaryKey
+            Keys:
+              content_id
+            Condition: (content_id in [2078157818, 2078157818])
+            Parts: 7/7
+            Granules: 17/17
+            Search Algorithm: generic exclusion search
+          Ranges: 7
+
+-- after, default settings, the planner picks proj_content_minute on its own
+Expression ((Project names + Projection))
+  Aggregating
+    Expression
+      ReadFromMergeTree (proj_content_minute)
+      Indexes:
+        PrimaryKey
+          Keys:
+            content_id
+          Condition: (content_id in [2078157818, 2078157818])
+          Parts: 6/7
+          Granules: 6/17
+          Search Algorithm: binary search
+        Ranges: 6
+
+-- forced, force_optimize_projection_name = 'proj_content_minute'
+Expression ((Project names + Projection))
+  Aggregating
+    Expression
+      ReadFromMergeTree (proj_content_minute)
+      Indexes:
+        PrimaryKey
+          Keys:
+            content_id
+          Condition: (content_id in [2078157818, 2078157818])
+          Parts: 6/7
+          Granules: 6/17
+          Search Algorithm: binary search
+        Ranges: 6
+
+-- system.query_log for the query above: projections=['clickliv_sample.minute_occupancy.proj_content_minute'], read_rows=15258
+-- checked: the base plan does not name the projection (True), the default plan does (True), and query_log confirms it ran (True)

@@ -3,17 +3,21 @@
 **Foreground-only concurrent viewers for SonyLIV streaming telemetry, on ClickHouse.**
 
 An open app is not a viewer. A session counts as concurrent only while it is **playing**,
-**foregrounded** and **heartbeat-fresh**. Counting every open session instead overstates
-**peak** concurrency by **39.0%** and **average** concurrency by **49.0%**, and it puts the
-peak in the wrong minute entirely.
+**foregrounded** and **heartbeat-fresh**.
 
-| | Foreground-only | Naive, every open session |
+On the graded day, 7,000,000 events from 2026-07-31, counting every open session instead
+reports **24,196** concurrent viewers in the busiest minute where **22,175** were actually
+watching. That is **2,021 phantom viewers in a single minute**. At live-sport scale those
+are the people capacity gets provisioned for and ad inventory gets priced against, and
+they are not watching anything.
+
+| Graded day, 2026-07-31 | Foreground-only | Naive, every open session |
 |---|---|---|
-| Peak concurrent viewers | **2,692** | 3,743 |
-| Minute the peak lands in, UTC | **2026-07-26 10:56** | 2026-07-26 10:59 |
-| Average concurrent viewers | **24.2** | 49.0% higher |
+| Peak concurrent viewers | **22,175** | 24,196, **9.1% high** |
+| Average concurrent viewers | **895.9** | 1,703.2, **90.1% high** |
+| Minute the peak lands in, UTC | 11:16 | 11:16, the same minute |
 
-Reproduce all three rows from a clean clone in three commands:
+Reproduce every row from a clean clone in three commands:
 
 ```sh
 cp .env.example .env
@@ -32,6 +36,28 @@ Docker at all.
 **`make claims` re-reads every published figure straight off the live service** and names
 any document still stating a superseded one. This README is checkable in one command
 rather than trusted, and the check runs against the database, not against a fixture.
+
+### Why the correction is 9.1% here and was 39.0% on the tuning extract
+
+The tuning extract shipped with the problem statement gives a peak overcount of 39.0% and
+puts the naive peak three minutes away from the real one. The graded day gives 9.1% and
+puts both in the same minute. That is not an inconsistency to explain away, it is the most
+useful thing we learned, and it is why this README publishes the correction per dataset
+instead of as a headline constant.
+
+The cause is measured. **Every one of the extract's 10,866 sessions carries an explicit
+`VideoSessionEnd`. On the graded day 37,649 of 108,486 sessions, 34.7%, never send one**
+because the day is cut at a boundary while they are still running. A completed session
+contributes a naive interval that runs all the way to its end marker, including the idle,
+paused and backgrounded tail at the finish, and that tail is exactly the time
+foreground-only excludes. A truncated session never accumulates that tail, so there is far
+less for the naive reading to overstate. The extract compounds it by being sparse, 12 days
+carrying 3,649 active minutes, where the graded day is one dense day of 4,145.
+
+The direction of the correction is identical on both datasets and the model is unchanged
+between them. Only the size moves, and it moves for a reason that is itself a property of
+real traffic rather than of our code. A team that tuned on the extract and quoted 39.0% on
+the graded day would be wrong by a factor of four.
 
 Running now: the [dashboard](https://clickliv.vercel.app), the
 [conversational surface](https://librechat.15-252-63-157.sslip.io), the

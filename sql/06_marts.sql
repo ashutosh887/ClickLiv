@@ -28,8 +28,14 @@ CREATE DATABASE ${MARTS_DB};
 -- 1,614, 'HIN' stays its own slice, 'LIVE' still finds live, and a third casing such as
 -- 'Hin' that would merge both matches nothing at all rather than reporting 1,899.
 --
--- Every one of the eight sort key dimensions is a parameter here, so one view really does
--- answer any filter combination rather than the common four.
+-- Every one of the ten sort key dimensions is a parameter here, so one view really does
+-- answer any filter combination rather than the common four. video_resolution and show_name
+-- are filterable on the same terms as the rest, because the dataset documents them as
+-- dimensions and a product that cannot filter on them does not match the data it serves.
+-- Their values are published exactly as stored: video_resolution holds 1920*1080, 1920 * 1080,
+-- Auto-1280*720 and NA as separate slices, and they stay separate. Folding those spellings
+-- together would merge real slices and inflate whichever one survived, which is the same
+-- reason hin and HIN stay distinct below.
 --
 -- SQL SECURITY DEFINER: marts_agent is granted SELECT on ${MARTS_DB}.* only, never on
 -- clickliv.minute_occupancy directly. Without DEFINER a view runs with the invoker's
@@ -59,7 +65,9 @@ UNION ALL SELECT 'category', toString(category) FROM minute_occupancy GROUP BY c
 UNION ALL SELECT 'app_version', toString(app_version) FROM minute_occupancy GROUP BY app_version
 UNION ALL SELECT 'player_version', toString(player_version) FROM minute_occupancy GROUP BY player_version
 UNION ALL SELECT 'audio_language', toString(audio_language) FROM minute_occupancy GROUP BY audio_language
-UNION ALL SELECT 'subtitle_language', toString(subtitle_language) FROM minute_occupancy GROUP BY subtitle_language;
+UNION ALL SELECT 'subtitle_language', toString(subtitle_language) FROM minute_occupancy GROUP BY subtitle_language
+UNION ALL SELECT 'video_resolution', toString(video_resolution) FROM minute_occupancy GROUP BY video_resolution
+UNION ALL SELECT 'show_name', toString(show_name) FROM minute_occupancy GROUP BY show_name;
 
 CREATE VIEW ${MARTS_DB}.v_occupancy_full
 (
@@ -67,7 +75,7 @@ CREATE VIEW ${MARTS_DB}.v_occupancy_full
     `concurrency` UInt64 COMMENT 'Foreground-only concurrent sessions in that minute, summed across every dimension left unfiltered.'
 )
 DEFINER = ${CH_USER} SQL SECURITY DEFINER
-COMMENT 'Parameterized, one parameter per filterable dimension: country, platform, video_type, category, app_version, player_version, audio_language, subtitle_language, content_id, minute_from, minute_to. All eleven are required. For no filter on a string dimension pass an empty string, or ALL, ANY, NONE, NULL, * or % in any case; for no filter on content_id pass 0. An exact value always wins; a value that matches nothing exactly falls back to a case-insensitive match, so LIVE finds live while hin and HIN stay distinct. Valid values are in v_dimension_values, titles are in v_titles, and the minute range is in v_data_window.'
+COMMENT 'Parameterized, one parameter per filterable dimension: country, platform, video_type, category, app_version, player_version, audio_language, subtitle_language, video_resolution, show_name, content_id, minute_from, minute_to. All thirteen are required. For no filter on a string dimension pass an empty string, or ALL, ANY, NONE, NULL, * or % in any case; for no filter on content_id pass 0. An exact value always wins; a value that matches nothing exactly falls back to a case-insensitive match, so LIVE finds live while hin and HIN stay distinct. video_resolution is recorded inconsistently in the source and is published as recorded, so 1920*1080, 1920 * 1080 and Auto-1920*1080 are three separate values rather than one; list them from v_dimension_values instead of guessing a spelling. Valid values are in v_dimension_values, titles are in v_titles, and the minute range is in v_data_window.'
 AS
 SELECT minute, sum(sessions) AS concurrency
 FROM minute_occupancy
@@ -79,6 +87,8 @@ WHERE (lower(trimBoth({country:String})) IN ('', 'all', 'any', 'none', 'null', '
   AND (lower(trimBoth({player_version:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR player_version = trimBoth({player_version:String}) OR (lower(player_version) = lower(trimBoth({player_version:String})) AND trimBoth({player_version:String}) NOT IN (SELECT value FROM ${MARTS_DB}.dimension_value WHERE dimension = 'player_version') AND (SELECT uniqExact(value) FROM ${MARTS_DB}.dimension_value WHERE dimension = 'player_version' AND lower(value) = lower(trimBoth({player_version:String}))) = 1))
   AND (lower(trimBoth({audio_language:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR audio_language = trimBoth({audio_language:String}) OR (lower(audio_language) = lower(trimBoth({audio_language:String})) AND trimBoth({audio_language:String}) NOT IN (SELECT value FROM ${MARTS_DB}.dimension_value WHERE dimension = 'audio_language') AND (SELECT uniqExact(value) FROM ${MARTS_DB}.dimension_value WHERE dimension = 'audio_language' AND lower(value) = lower(trimBoth({audio_language:String}))) = 1))
   AND (lower(trimBoth({subtitle_language:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR subtitle_language = trimBoth({subtitle_language:String}) OR (lower(subtitle_language) = lower(trimBoth({subtitle_language:String})) AND trimBoth({subtitle_language:String}) NOT IN (SELECT value FROM ${MARTS_DB}.dimension_value WHERE dimension = 'subtitle_language') AND (SELECT uniqExact(value) FROM ${MARTS_DB}.dimension_value WHERE dimension = 'subtitle_language' AND lower(value) = lower(trimBoth({subtitle_language:String}))) = 1))
+  AND (lower(trimBoth({video_resolution:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR video_resolution = trimBoth({video_resolution:String}) OR (lower(video_resolution) = lower(trimBoth({video_resolution:String})) AND trimBoth({video_resolution:String}) NOT IN (SELECT value FROM ${MARTS_DB}.dimension_value WHERE dimension = 'video_resolution') AND (SELECT uniqExact(value) FROM ${MARTS_DB}.dimension_value WHERE dimension = 'video_resolution' AND lower(value) = lower(trimBoth({video_resolution:String}))) = 1))
+  AND (lower(trimBoth({show_name:String})) IN ('', 'all', 'any', 'none', 'null', '*', '%') OR show_name = trimBoth({show_name:String}) OR (lower(show_name) = lower(trimBoth({show_name:String})) AND trimBoth({show_name:String}) NOT IN (SELECT value FROM ${MARTS_DB}.dimension_value WHERE dimension = 'show_name') AND (SELECT uniqExact(value) FROM ${MARTS_DB}.dimension_value WHERE dimension = 'show_name' AND lower(value) = lower(trimBoth({show_name:String}))) = 1))
   AND content_id = coalesce(nullIf({content_id:UInt64}, toUInt64(0)), content_id)
   AND minute BETWEEN {minute_from:UInt32} AND {minute_to:UInt32}
 GROUP BY minute
@@ -94,13 +104,14 @@ CREATE VIEW ${MARTS_DB}.v_occupancy_minute
     `concurrency` UInt64 COMMENT 'Foreground-only concurrent sessions in that minute, summed across every dimension left unfiltered.'
 )
 DEFINER = ${CH_USER} SQL SECURITY DEFINER
-COMMENT 'Parameterized. Call as v_occupancy_minute(country=..., platform=..., video_type=..., content_id=..., minute_from=..., minute_to=...); all six are required. For no filter pass an empty string, or ALL, ANY, NONE, NULL, * or % in any case, and pass content_id = 0. An exact value always wins; a value that matches nothing exactly falls back to a case-insensitive match, so LIVE finds live while hin and HIN stay distinct. For category, app_version, player_version, audio_language or subtitle_language use v_occupancy_full instead. Valid values are in v_dimension_values and the minute range is in v_data_window.'
+COMMENT 'Parameterized. Call as v_occupancy_minute(country=..., platform=..., video_type=..., content_id=..., minute_from=..., minute_to=...); all six are required. For no filter pass an empty string, or ALL, ANY, NONE, NULL, * or % in any case, and pass content_id = 0. An exact value always wins; a value that matches nothing exactly falls back to a case-insensitive match, so LIVE finds live while hin and HIN stay distinct. For category, app_version, player_version, audio_language, subtitle_language, video_resolution or show_name use v_occupancy_full instead. Valid values are in v_dimension_values and the minute range is in v_data_window.'
 AS
 SELECT minute, concurrency
 FROM ${MARTS_DB}.v_occupancy_full(
     country = {country:String}, platform = {platform:String},
     video_type = {video_type:String}, category = '', app_version = '',
     player_version = '', audio_language = '', subtitle_language = '',
+    video_resolution = '', show_name = '',
     content_id = {content_id:UInt64},
     minute_from = {minute_from:UInt32}, minute_to = {minute_to:UInt32});
 
@@ -115,7 +126,7 @@ CREATE VIEW ${MARTS_DB}.v_concurrency
     `minutes_in_bucket`   UInt64  COMMENT 'Minutes inside the bucket that carried at least one session.'
 )
 DEFINER = ${CH_USER} SQL SECURITY DEFINER
-COMMENT 'Parameterized. Call as v_concurrency(country=..., platform=..., video_type=..., content_id=..., minute_from=..., minute_to=..., grain_minutes=...); all seven are required. For no filter pass an empty string, or ALL, ANY, NONE, NULL, * or % in any case, and pass content_id = 0. grain_minutes is 1 for minute, 60 for hour, 1440 for day. For the busiest moment overall, take minute_from and minute_to from v_data_window, grain_minutes = 1, and order by peak_concurrency descending. For the other four dimensions use v_concurrency_full.'
+COMMENT 'Parameterized. Call as v_concurrency(country=..., platform=..., video_type=..., content_id=..., minute_from=..., minute_to=..., grain_minutes=...); all seven are required. For no filter pass an empty string, or ALL, ANY, NONE, NULL, * or % in any case, and pass content_id = 0. grain_minutes is 1 for minute, 60 for hour, 1440 for day. For the busiest moment overall, take min_minute and max_minute from v_data_window, grain_minutes = 1, and order by peak_concurrency descending; dense_min_minute and dense_max_minute narrow the same call to the days the data actually lives on. For the other seven dimensions use v_concurrency_full.'
 AS
 SELECT
     intDiv(minute, {grain_minutes:UInt32}) * {grain_minutes:UInt32} AS bucket_minute,
@@ -138,7 +149,7 @@ CREATE VIEW ${MARTS_DB}.v_concurrency_full
     `minutes_in_bucket`   UInt64  COMMENT 'Minutes inside the bucket that carried at least one session.'
 )
 DEFINER = ${CH_USER} SQL SECURITY DEFINER
-COMMENT 'Parameterized, every dimension plus a grain: country, platform, video_type, category, app_version, player_version, audio_language, subtitle_language, content_id, minute_from, minute_to, grain_minutes. All twelve are required. Sentinels and case folding work exactly as in v_occupancy_full. grain_minutes is 1 for minute, 60 for hour, 1440 for day.'
+COMMENT 'Parameterized, every dimension plus a grain: country, platform, video_type, category, app_version, player_version, audio_language, subtitle_language, video_resolution, show_name, content_id, minute_from, minute_to, grain_minutes. All fourteen are required. Sentinels and case folding work exactly as in v_occupancy_full, and video_resolution keeps every spelling the source recorded rather than merging them. grain_minutes is 1 for minute, 60 for hour, 1440 for day.'
 AS
 SELECT
     intDiv(minute, {grain_minutes:UInt32}) * {grain_minutes:UInt32} AS bucket_minute,
@@ -151,6 +162,7 @@ FROM ${MARTS_DB}.v_occupancy_full(
     app_version = {app_version:String}, player_version = {player_version:String},
     audio_language = {audio_language:String},
     subtitle_language = {subtitle_language:String},
+    video_resolution = {video_resolution:String}, show_name = {show_name:String},
     content_id = {content_id:UInt64},
     minute_from = {minute_from:UInt32}, minute_to = {minute_to:UInt32})
 GROUP BY bucket_minute
@@ -160,6 +172,15 @@ ORDER BY bucket_minute;
 -- assuming "now". This dataset is a fixed historical extract, so a query written
 -- against the last hour or the last day matches nothing and looks like an empty
 -- table rather than a wrong time range.
+--
+-- Two windows, both published, because a handful of sessions carry timestamps far
+-- outside the day the extract is about and every one of those rows is loaded as
+-- given. The full extent is what the data literally spans. The dense window is the
+-- span of the calendar days that carry at least one percent of the dataset's session
+-- minutes, with the busiest day always qualifying so the window can never come back
+-- empty. Neither the strays nor the dense rule filter anything: outlier_minutes and
+-- outlier_rows count what falls outside so the strays are a published number rather
+-- than a deletion.
 CREATE VIEW ${MARTS_DB}.v_data_window
 (
     `min_minute`            UInt32          COMMENT 'Earliest minute with sessions, in minutes since the unix epoch. Pass this as minute_from.',
@@ -168,19 +189,50 @@ CREATE VIEW ${MARTS_DB}.v_data_window
     `max_utc`               DateTime('UTC') COMMENT 'Latest minute as a UTC timestamp.',
     `span_days`             Float64         COMMENT 'Length of the window in days.',
     `minutes_with_sessions` UInt64          COMMENT 'Distinct minutes that carry at least one session.',
-    `occupancy_rows`        UInt64          COMMENT 'Rows in the underlying per-minute occupancy table.'
+    `occupancy_rows`        UInt64          COMMENT 'Rows in the underlying per-minute occupancy table.',
+    `dense_min_minute`      UInt32          COMMENT 'Earliest minute of the dense window, in minutes since the unix epoch. Pass this as minute_from to work over the days the data actually lives on.',
+    `dense_max_minute`      UInt32          COMMENT 'Latest minute of the dense window, in minutes since the unix epoch. Pass this as minute_to.',
+    `dense_min_utc`         DateTime('UTC') COMMENT 'Earliest minute of the dense window as a UTC timestamp.',
+    `dense_max_utc`         DateTime('UTC') COMMENT 'Latest minute of the dense window as a UTC timestamp.',
+    `dense_span_days`       Float64         COMMENT 'Length of the dense window in days. Read it against span_days to see how far the stray timestamps reach.',
+    `dense_days`            UInt64          COMMENT 'How many calendar days clear the one percent bar and so define the dense window.',
+    `outlier_minutes`       UInt64          COMMENT 'Distinct minutes with sessions that fall outside the dense window. They are loaded, queryable and counted here; nothing is dropped.',
+    `outlier_rows`          UInt64          COMMENT 'Rows of the per-minute occupancy table that fall outside the dense window.'
 )
 DEFINER = ${CH_USER} SQL SECURITY DEFINER
-COMMENT 'The time window this dataset actually covers. It is a fixed historical extract, not a live feed, so never assume now() is inside it. Read min_minute and max_minute straight into the minute_from and minute_to parameters of the concurrency views.'
+COMMENT 'The time window this dataset actually covers, reported twice. min_minute to max_minute is the full extent of every row as loaded, unfiltered. dense_min_minute to dense_max_minute is the dense window: the span of the calendar days carrying at least one percent of the dataset session minutes, with the busiest day always included. A few sessions carry stray timestamps far outside the day the extract is about, so the two windows differ; outlier_minutes and outlier_rows say by how much rather than hiding it, and no row is filtered anywhere in this schema. Quote the dense window when describing the dataset, and pass dense_min_minute and dense_max_minute as minute_from and minute_to unless you specifically want the strays. It is a fixed historical extract, not a live feed, so never assume now() is inside it.'
 AS
+WITH
+    day_totals AS
+    (
+        SELECT
+            toDate(toDateTime(minute * 60, 'UTC')) AS day,
+            toFloat64(sum(sessions))               AS session_minutes,
+            min(minute)                            AS day_min,
+            max(minute)                            AS day_max
+        FROM minute_occupancy
+        GROUP BY day
+    ),
+    ifNull((SELECT least(0.01 * sum(session_minutes), max(session_minutes)) FROM day_totals), toFloat64(0)) AS dense_floor,
+    ifNull((SELECT min(day_min) FROM day_totals WHERE session_minutes >= dense_floor), toUInt32(0))         AS dense_lo,
+    ifNull((SELECT max(day_max) FROM day_totals WHERE session_minutes >= dense_floor), toUInt32(0))         AS dense_hi,
+    ifNull((SELECT count() FROM day_totals WHERE session_minutes >= dense_floor), toUInt64(0))              AS dense_day_count
 SELECT
-    min(minute)                            AS min_minute,
-    max(minute)                            AS max_minute,
-    toDateTime(min(minute) * 60, 'UTC')    AS min_utc,
-    toDateTime(max(minute) * 60, 'UTC')    AS max_utc,
-    (max(minute) - min(minute)) / 1440.0   AS span_days,
-    uniqExact(minute)                      AS minutes_with_sessions,
-    count()                                AS occupancy_rows
+    min(minute)                                                     AS min_minute,
+    max(minute)                                                     AS max_minute,
+    toDateTime(min(minute) * 60, 'UTC')                             AS min_utc,
+    toDateTime(max(minute) * 60, 'UTC')                             AS max_utc,
+    (max(minute) - min(minute)) / 1440.0                            AS span_days,
+    uniqExact(minute)                                               AS minutes_with_sessions,
+    count()                                                         AS occupancy_rows,
+    dense_lo                                                        AS dense_min_minute,
+    dense_hi                                                        AS dense_max_minute,
+    toDateTime(dense_lo * 60, 'UTC')                                AS dense_min_utc,
+    toDateTime(dense_hi * 60, 'UTC')                                AS dense_max_utc,
+    (dense_hi - dense_lo) / 1440.0                                  AS dense_span_days,
+    dense_day_count                                                 AS dense_days,
+    uniqExactIf(minute, (minute < dense_lo) OR (minute > dense_hi)) AS outlier_minutes,
+    countIf((minute < dense_lo) OR (minute > dense_hi))             AS outlier_rows
 FROM minute_occupancy;
 
 -- Every value each string dim can take, so a filter is picked from the data rather
@@ -201,7 +253,7 @@ CREATE VIEW ${MARTS_DB}.v_dimension_values
     `last_minute`     UInt32 COMMENT 'Last minute this value appears, in minutes since the unix epoch.'
 )
 DEFINER = ${CH_USER} SQL SECURITY DEFINER
-COMMENT 'Every accepted value of every filterable string dimension: country, platform, video_type, category, app_version, player_version, audio_language and subtitle_language. Pass one as the matching parameter; pass an empty string, or ALL, ANY, NONE, NULL, * or %, to leave that dimension unfiltered. content_id is numeric, 0 means unfiltered, and titles resolve through v_titles. This view carries no concurrency figure on purpose, because a peak per value has to be summed across the other dimensions before the maximum is taken.'
+COMMENT 'Every accepted value of every filterable string dimension: country, platform, video_type, category, app_version, player_version, audio_language, subtitle_language, video_resolution and show_name. Pass one as the matching parameter; pass an empty string, or ALL, ANY, NONE, NULL, * or %, to leave that dimension unfiltered. content_id is numeric, 0 means unfiltered, and titles resolve through v_titles. video_resolution is the one dimension the source records inconsistently, so it lists many spellings of the same shape and every one is kept as its own value rather than merged. This view carries no concurrency figure on purpose, because a peak per value has to be summed across the other dimensions before the maximum is taken.'
 AS
 SELECT * FROM (
     SELECT 'country'    AS dimension, toString(country)    AS value,
@@ -229,6 +281,12 @@ SELECT * FROM (
     UNION ALL
     SELECT 'subtitle_language', toString(subtitle_language), uniqExact(minute), min(minute), max(minute)
     FROM minute_occupancy GROUP BY subtitle_language
+    UNION ALL
+    SELECT 'video_resolution', toString(video_resolution), uniqExact(minute), min(minute), max(minute)
+    FROM minute_occupancy GROUP BY video_resolution
+    UNION ALL
+    SELECT 'show_name', toString(show_name), uniqExact(minute), min(minute), max(minute)
+    FROM minute_occupancy GROUP BY show_name
 )
 WHERE value != ''
 ORDER BY dimension, minutes_present DESC, value;
@@ -316,29 +374,42 @@ GROUP BY minute
 ORDER BY minute;
 
 -- One row, so the headline claim answers in a single question.
+--
+-- The peaks are taken over every row, unfiltered, because that is the strongest form
+-- of the claim and a stray session cannot lift a peak: it is alone in its own minute.
+-- The averages are taken over the dense window from v_data_window instead. A mean has
+-- a denominator, and over the full extent that denominator picks up thousands of
+-- near-empty minutes contributed by a handful of stray timestamps, which drags both
+-- means toward zero and inflates the ratio between them. Same rows loaded either way;
+-- this only decides which minutes the mean is a mean of.
 CREATE VIEW ${MARTS_DB}.v_overcount
 (
-    `foreground_peak`            UInt64          COMMENT 'Peak foreground-only concurrency, the number this project publishes.',
+    `foreground_peak`            UInt64          COMMENT 'Peak foreground-only concurrency, the number this project publishes. Taken over every minute in the dataset, unfiltered.',
     `foreground_peak_utc`        DateTime('UTC') COMMENT 'The minute the foreground-only peak lands in.',
     `naive_peak`                 UInt64          COMMENT 'Peak concurrency if every open session counted, background included.',
     `naive_peak_utc`             DateTime('UTC') COMMENT 'The minute the naive peak lands in. It is a different minute, which is the point.',
     `peak_overcount_pct`         Float64         COMMENT 'How much higher the naive peak is, as a percentage of the foreground peak.',
-    `foreground_average`         Float64         COMMENT 'Mean foreground-only concurrency across minutes that carry sessions.',
-    `naive_average`              Float64         COMMENT 'Mean naive concurrency across the same minutes.',
-    `average_overcount_pct`      Float64         COMMENT 'How much higher the naive average is, as a percentage of the foreground average.'
+    `foreground_average`         Float64         COMMENT 'Mean foreground-only concurrency per minute, over every minute of the dense window in v_data_window, zero-session minutes included. Minutes outside the dense window are left out of this denominator only; no row is filtered from any view.',
+    `naive_average`              Float64         COMMENT 'Mean naive concurrency over exactly the same minutes, so both averages share one denominator.',
+    `average_overcount_pct`      Float64         COMMENT 'How much higher the naive average is, as a percentage of the foreground average, both over the dense window. Not comparable with the benchmark average in answers/benchmark_answers.csv, which divides by active minutes across the full extent instead.'
 )
 DEFINER = ${CH_USER} SQL SECURITY DEFINER
-COMMENT 'The overcount claim as one row: counting every open session rather than only foreground sessions inflates the peak and the average, and moves the peak into a different minute. Answers "how much would we overcount if we counted every open session" without any arithmetic on the caller side.'
+COMMENT 'The overcount claim as one row: counting every open session rather than only foreground sessions inflates the peak and the average, and moves the peak into a different minute. Answers "how much would we overcount if we counted every open session" without any arithmetic on the caller side. The peaks are over every minute in the dataset; the averages are over every minute of the dense window reported by v_data_window, because a mean over the full extent would be diluted by the near-empty minutes a few stray timestamps produce. Nothing is filtered out of the data, only out of the denominator.'
 AS
+WITH
+    ifNull((SELECT dense_min_minute FROM ${MARTS_DB}.v_data_window), toUInt32(0)) AS dense_lo,
+    ifNull((SELECT dense_max_minute FROM ${MARTS_DB}.v_data_window), toUInt32(0)) AS dense_hi,
+    (minute >= dense_lo) AND (minute <= dense_hi)                                 AS in_dense
 SELECT
     max(foreground_concurrency)                                          AS foreground_peak,
     toDateTime(argMax(minute, foreground_concurrency) * 60, 'UTC')       AS foreground_peak_utc,
     max(naive_concurrency)                                               AS naive_peak,
     toDateTime(argMax(minute, naive_concurrency) * 60, 'UTC')            AS naive_peak_utc,
     100 * (max(naive_concurrency) / max(foreground_concurrency) - 1)     AS peak_overcount_pct,
-    avg(foreground_concurrency)                                          AS foreground_average,
-    avg(naive_concurrency)                                               AS naive_average,
-    100 * (avg(naive_concurrency) / avg(foreground_concurrency) - 1)     AS average_overcount_pct
+    avgIf(foreground_concurrency, in_dense)                              AS foreground_average,
+    avgIf(naive_concurrency, in_dense)                                   AS naive_average,
+    100 * (avgIf(naive_concurrency, in_dense)
+           / avgIf(foreground_concurrency, in_dense) - 1)                AS average_overcount_pct
 FROM ${MARTS_DB}.v_naive_vs_foreground;
 
 -- The MCP or dashboard surface. Everything upstream of marts is ungranted.

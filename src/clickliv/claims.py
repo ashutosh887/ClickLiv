@@ -53,7 +53,8 @@ def measure(ch: ClickHouse) -> dict:
         args = ", ".join(
             f"{d} = '{value if d == dim else ''}'"
             for d in ("country", "platform", "video_type", "category", "app_version",
-                      "player_version", "audio_language", "subtitle_language"))
+                      "player_version", "audio_language", "subtitle_language",
+                      "video_resolution", "show_name"))
         out[label] = ch.scalar(
             f"SELECT max(concurrency) FROM {marts}.v_occupancy_full("
             f"{args}, content_id = 0, {window_args})")

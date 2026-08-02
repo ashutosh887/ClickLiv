@@ -1,0 +1,38 @@
+{
+  "clickhouse_version": "26.4.1.2029",
+  "host": "buzl62k3rx.ap-south-1.aws.clickhouse.cloud",
+  "database": "clickliv_sample",
+  "git_commit": "f2e591c363d5b1284320d9ff3b7922efef6729ba",
+  "gap_seconds": 90,
+  "grace_seconds": 40,
+  "row_counts": {
+    "raw_events": 905558,
+    "active_intervals": 32562,
+    "minute_occupancy": 98034,
+    "minute_deltas": 35849
+  },
+  "minute_from": 29734063,
+  "minute_to": 29751090,
+  "minute_from_utc": "2026-07-14 15:43:00Z",
+  "minute_to_utc": "2026-07-26 11:30:00Z",
+  "benchmarks": 8,
+  "latency_repetitions": 5,
+  "python_reference_peak_concurrency": 2710,
+  "files": [
+    {
+      "file": "benchmark_answers.csv",
+      "bytes": 1168,
+      "sha256": "fb295913f4333f0a73c539f75cc370ee6a5c7c28636d97661fa8e9739ba311b9"
+    },
+    {
+      "file": "benchmark_answers.json",
+      "bytes": 3187,
+      "sha256": "ba5f134a469ae87c73d21ccd1d1c58e8d6cc098543866ba2bf5fd42ffcb98fe6"
+    },
+    {
+      "file": "README.txt",
+      "bytes": 1961,
+      "sha256": "bf26e135b9b97ab2552aaa33666b09feb2f0ab375b16a45bcb931434ebfc7b96"
+    }
+  ]
+}

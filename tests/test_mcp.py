@@ -117,7 +117,8 @@ class LiveCaseRuleTests(unittest.TestCase):
 
     def peak(self, **filters) -> int:
         names = ("country", "platform", "video_type", "category", "app_version",
-                 "player_version", "audio_language", "subtitle_language")
+                 "player_version", "audio_language", "subtitle_language",
+                 "video_resolution", "show_name")
         args = ", ".join(f"{name} = {{{name}:String}}" for name in names)
         sql = (f"SELECT max(peak_concurrency) FROM marts.v_concurrency_full({args}, "
                "content_id = 0, minute_from = 0, minute_to = 4294967295, grain_minutes = 1)")

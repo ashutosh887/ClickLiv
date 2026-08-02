@@ -1,8 +1,8 @@
 -- optional problem-statement use case: alert on concurrency decline
 -- rule: minute-over-minute drop >= 50%, base concurrency >= 50
 -- deterministic threshold on marts.v_occupancy_minute, not an LLM call
--- (see module docstring for why); query_id 6f529568-97a6-448a-b16b-e4962839a22a
+-- (see module docstring for why); query_id ffa42797-e1df-4eb2-ab32-319d7e905f71
 
-minute 29751090: 214 -> 7 sessions (96.7% drop). possible causes per the problem statement: asset ended, system issue, or content not engaging; the alert flags the minute, a human or a downstream LLM call decides which.
+minute 29758291: 18080 -> 29 sessions (99.8% drop). possible causes per the problem statement: asset ended, system issue, or content not engaging; the alert flags the minute, a human or a downstream LLM call decides which.
 
-narration (gpt-5.2 via OpenAI, one call, optional, off by default): This looks most like an **asset ended**: a sudden, near-total cliff drop (214→7, −96.7%) in a single minute is characteristic of a stream/video ending or the audience being forced to exit at once, rather than a gradual disengagement.
+narration (gemini-3-flash-preview via Google AI Studio, one call, optional, off by default): The most likely cause is **asset ended** because a near-total 99.8% drop in a single minute indicates a synchronized mass exit typical of a program reaching its conclusion. Such an instantaneous collapse is characteristic of a hard cutoff point rather than the gradual decline seen with disengaging content or the partial failures often associated with system issues.

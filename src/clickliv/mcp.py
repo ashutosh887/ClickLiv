@@ -63,6 +63,18 @@ def series_sql(names: tuple[str, ...]) -> str:
     return f"SELECT minute, concurrency FROM marts.v_occupancy_full({filter_args(names)})"
 
 
+def density_sql(names: tuple[str, ...]) -> str:
+    return ("SELECT toDate(toDateTime(minute * 60)) AS day, count() AS minutes, "
+            "max(concurrency) AS peak "
+            f"FROM marts.v_occupancy_full({filter_args(names)}) "
+            "GROUP BY day ORDER BY peak DESC, minutes DESC LIMIT 1")
+
+
+def unfiltered(names: tuple[str, ...]) -> dict:
+    return {**{f"param_{name}": "" for name in names}, "param_content_id": 0,
+            "param_minute_from": MINUTE_MIN, "param_minute_to": MINUTE_MAX}
+
+
 WINDOW_SQL =("SELECT min_minute, max_minute, minutes_with_sessions, span_days "
               "FROM marts.v_data_window")
 
@@ -266,6 +278,18 @@ def stamp(minute: int | None) -> str:
     return datetime.fromtimestamp(int(minute) * 60, UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def busiest_day(agent: ClickHouse, names: tuple[str, ...]) -> str:
+    """The raw window runs from the earliest stray timestamp, so name where the traffic is."""
+    rows = agent.query(density_sql(names), settings=unfiltered(names)).rows
+    if not rows:
+        return ""
+    day, minutes, peak = rows[0]
+    return (f"concurrency peaks on {day}, which carries {int(minutes):,} of those minutes and "
+            f"the highest concurrency in the extract at {int(peak):,}; the rest of the span is "
+            f"a thin tail, so treat that day as the window a question means unless it names "
+            f"another")
+
+
 def empty_note(agent: ClickHouse, label: str, requested: tuple[int, int]) -> list[str]:
     """An empty match is never an answer, so say what does exist instead of returning a zero."""
     low, high, minutes, _ = agent.query(WINDOW_SQL).rows[0]
@@ -275,6 +299,7 @@ def empty_note(agent: ClickHouse, label: str, requested: tuple[int, int]) -> lis
         f"the dataset is a fixed historical extract covering {stamp(low)} to {stamp(high)}, "
         f"epoch minutes {low} to {high}, {int(minutes):,} of which carry sessions, and "
         f"nothing outside that window exists",
+        busiest_day(agent, names_of(agent)),
     ]
     if requested[0] > int(high) or requested[1] < int(low):
         note.append(f"the window asked for, {stamp(requested[0])} to {stamp(requested[1])}, "
@@ -283,7 +308,7 @@ def empty_note(agent: ClickHouse, label: str, requested: tuple[int, int]) -> lis
                     f"window above, and offer to answer over it instead of reporting zero")
     note.append("call list_dimensions for every filter value this surface accepts, and tell "
                 "the user which part of the question the data does not cover")
-    return note
+    return [line for line in note if line]
 
 
 def slice_branch(index: int, dimension: str, names: tuple[str, ...]) -> str:
@@ -471,6 +496,7 @@ def tool_list_dimensions(agent: ClickHouse, arguments: dict):
         f"the dataset is a fixed historical extract covering {stamp(low)} to {stamp(high)}, "
         f"{float(days):.1f} days, so do not assume the present is inside it",
         f"epoch minutes {low} to {high}, {int(minutes):,} minutes carry sessions",
+        busiest_day(agent, tuple(known)),
         f"grain values for concurrency_peak: {', '.join(GRAINS)}, default {DEFAULT_GRAIN}",
         "values are listed busiest first inside each dimension, and every one of them is a "
         "filter concurrency_peak and concurrency_series accept; call top_slices with a "
@@ -478,6 +504,7 @@ def tool_list_dimensions(agent: ClickHouse, arguments: dict):
         "values are case sensitive and near duplicates that differ only in case are separate "
         "slices, so hin and HIN are two different values, not one",
     ]
+    summary = [line for line in summary if line]
     summary.insert(1, f"this dataset carries {len(known)} filter dimensions, "
                       f"{', '.join(known)}, and every one of them is an argument of "
                       "concurrency_peak and concurrency_series")
