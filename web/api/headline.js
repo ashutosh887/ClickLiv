@@ -6,7 +6,9 @@ SELECT foreground_peak, foreground_peak_utc, naive_peak, naive_peak_utc,
 FROM ${schema}.v_overcount`;
 
 const WINDOW = (schema) => `
-SELECT min_utc, max_utc, round(span_days, 2), minutes_with_sessions, occupancy_rows
+SELECT min_utc, max_utc, round(span_days, 2), minutes_with_sessions, occupancy_rows,
+       dense_min_utc, dense_max_utc, round(dense_span_days, 2), dense_days,
+       outlier_minutes, outlier_rows
 FROM ${schema}.v_data_window`;
 
 export default async function handler(req, res) {
@@ -21,7 +23,10 @@ export default async function handler(req, res) {
       peakOvercount, foregroundAverage, naiveAverage, averageOvercount,
     ] = overcount.data?.[0] || [];
     const windowed = await query(WINDOW(schema), {}, schema);
-    const [from, to, span, minutes, rows] = windowed.data?.[0] || [];
+    const [
+      from, to, span, minutes, rows,
+      denseFrom, denseTo, denseSpan, denseDays, outlierMinutes, outlierRows,
+    ] = windowed.data?.[0] || [];
     return send(res, 200, {
       dataset,
       datasets,
@@ -39,6 +44,12 @@ export default async function handler(req, res) {
       span_days: span ?? null,
       minutes_with_sessions: Number(minutes ?? 0),
       occupancy_rows: Number(rows ?? 0),
+      dense_window_from: denseFrom ?? null,
+      dense_window_to: denseTo ?? null,
+      dense_span_days: denseSpan ?? null,
+      dense_days: Number(denseDays ?? 0),
+      outlier_minutes: Number(outlierMinutes ?? 0),
+      outlier_rows: Number(outlierRows ?? 0),
       server_ms: Math.round((overcount.statistics?.elapsed ?? 0) * 1000),
       served_by: `${schema}.v_overcount as ${config().user}, readonly with a query budget`,
     }, 60);

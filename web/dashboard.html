@@ -270,8 +270,10 @@ async function loadDatasets() {
     const select = document.createElement('select');
     select.id = 'dataset';
     for (const row of rows) {
-      const window = row.window_from && row.window_to
-        ? `, ${String(row.window_from).slice(0, 10)} to ${String(row.window_to).slice(0, 10)}`
+      const from = row.dense_window_from || row.window_from;
+      const to = row.dense_window_to || row.window_to;
+      const window = from && to
+        ? `, ${String(from).slice(0, 10)} to ${String(to).slice(0, 10)}`
         : '';
       select.append(option(row.name, `${row.name}${window}`));
     }
@@ -309,7 +311,7 @@ function params(extra = {}) {
   return search;
 }
 
-function control(name, label, options) {
+function control(name, label, options, hint) {
   const field = document.createElement('div');
   field.className = 'field';
   const tag = document.createElement('label');
@@ -317,6 +319,7 @@ function control(name, label, options) {
   tag.textContent = label;
   const select = document.createElement('select');
   select.id = `f_${name}`;
+  if (hint) select.title = hint;
   select.append(...options);
   select.value = filters[name] || '';
   select.addEventListener('change', async () => {
@@ -339,21 +342,31 @@ function applied() {
   show($('clear'), set.length > 0);
 }
 
+function allLabel(text, shown, total) {
+  return total > shown ? `${text}, top ${fmt(shown)} of ${fmt(total)}` : text;
+}
+
 function build(data) {
   const fields = [];
   const names = [...(data.filterable || [])].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   for (const name of names) {
     const rows = data.values[name] || [];
+    const total = Number(data.totals?.[name] ?? rows.length);
     fields.push(control(name, humanize(name), [
-      option('', `All ${humanize(name).toLowerCase()}`),
+      option('', allLabel(`All ${humanize(name).toLowerCase()}`, rows.length, total)),
       ...rows.map((row) => option(row.value, row.value)),
-    ]));
+    ], total > rows.length
+      ? `${fmt(rows.length)} of ${fmt(total)} values, the most present first`
+      : `${fmt(total)} values`));
   }
   if ((data.titles || []).length) {
+    const total = Number(data.titles_total ?? data.titles.length);
     fields.push(control('content_id', 'Title', [
-      option('', 'All titles'),
+      option('', allLabel('All titles', data.titles.length, total)),
       ...data.titles.map((row) => option(row.content_id, row.title)),
-    ]));
+    ], total > data.titles.length
+      ? `${fmt(data.titles.length)} of ${fmt(total)} titles, the most present first`
+      : `${fmt(total)} titles`));
   }
   if ((data.windows || []).length > 1) {
     fields.push(control('window', 'Window',

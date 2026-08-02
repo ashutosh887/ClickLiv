@@ -3,23 +3,30 @@ import {
 } from './_clickhouse.js';
 
 const VIEW = 'v_concurrency_full';
-const MAX_VALUES = 400;
+const MAX_VALUES = 2500;
 const MAX_TITLES = 2000;
 const CROSSOVER_PREFERRED = ['platform', 'video_type'];
 const CROSSOVER_MAX_VALUES = 12;
 const CROSSOVER_MAX_SLICES = 20;
 
 const VALUES = (schema) => `
-SELECT dimension, value, minutes_present
-FROM ${schema}.v_dimension_values
-WHERE value != ''
+SELECT dimension, value, minutes_present, total
+FROM (
+    SELECT dimension, value, minutes_present,
+           count() OVER (PARTITION BY dimension) AS total
+    FROM ${schema}.v_dimension_values
+    WHERE value != ''
+)
 ORDER BY dimension, minutes_present DESC, value
 LIMIT {limit:UInt32} BY dimension`;
 
 const TITLES = (schema) => `
-SELECT content_id, title
-FROM ${schema}.v_titles
-WHERE title != ''
+SELECT content_id, title, total
+FROM (
+    SELECT content_id, title, minutes_present, count() OVER () AS total
+    FROM ${schema}.v_titles
+    WHERE title != ''
+)
 ORDER BY minutes_present DESC, content_id
 LIMIT {limit:UInt32}`;
 
@@ -92,8 +99,10 @@ export default async function handler(req, res) {
       query(WINDOW(schema), {}, schema),
     ]);
     const values = {};
-    for (const [dimension, value, minutes] of valueRows.data || []) {
+    const totals = {};
+    for (const [dimension, value, minutes, total] of valueRows.data || []) {
       (values[dimension] ||= []).push({ value: String(value), minutes_present: Number(minutes) });
+      totals[dimension] = Number(total);
     }
     const filterable = dimensionsOf(names).filter((name) => (values[name] || []).length);
 
@@ -133,9 +142,11 @@ export default async function handler(req, res) {
       filters,
       ...windowsFor(windowRows.data?.[0] || [], overall.peak_minute),
       values,
+      totals,
       titles: (titleRows.data || []).map(([id, title]) => ({
         content_id: String(id), title: String(title),
       })),
+      titles_total: Number(titleRows.data?.[0]?.[2] ?? (titleRows.data || []).length),
       crossover,
       overall_peak: overall.peak,
       overall_peak_at: overall.peak_at,

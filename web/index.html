@@ -407,9 +407,22 @@ function fill(data) {
   $('naiveAt').textContent = `${dayOf(data.naive_peak_utc)} at ${naive} UTC`;
   $('avg').textContent = Number(data.foreground_average).toFixed(1);
   $('avgNaive').textContent = `${Number(data.naive_average).toFixed(1)} counting every open session`;
-  $('window').textContent = `${dayOf(data.window_from)} to ${dayOf(data.window_to)}`;
-  $('windowSpan').textContent =
+  const rollup =
     `${fmt(data.minutes_with_sessions)} minutes carrying sessions, ${fmt(data.occupancy_rows)} rollup rows`;
+  const denseDays = Number(data.dense_days || 0);
+  const strays = Number(data.outlier_minutes || 0);
+  if (data.dense_window_from && data.dense_window_to && denseDays) {
+    $('window').textContent = denseDays === 1
+      ? `${dayOf(data.dense_window_from)}, one day`
+      : `${dayOf(data.dense_window_from)} to ${dayOf(data.dense_window_to)}, ${fmt(denseDays)} days`;
+    $('windowSpan').textContent = strays
+      ? `full extent ${dayOf(data.window_from)} to ${dayOf(data.window_to)},`
+        + ` ${fmt(strays)} stray minutes kept and counted`
+      : rollup;
+  } else {
+    $('window').textContent = `${dayOf(data.window_from)} to ${dayOf(data.window_to)}`;
+    $('windowSpan').textContent = rollup;
+  }
 
   $('claimStatus').innerHTML =
     `<span class="live">live</span> &nbsp;dataset <code>${data.dataset}</code>, read from`
