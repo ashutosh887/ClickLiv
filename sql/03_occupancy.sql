@@ -48,8 +48,8 @@ WITH
                 t * 8 + multiIf(
                     event_type = 'VideoSessionStart', 1,
                     event_type = 'VideoPlay'
-                        OR event IN ('resume', 'speed-resume', 'AdResume'), 2,
-                    event IN ('pause', 'speed-pause', 'AdPause'), 4,
+                        OR lower(event) IN ('resume', 'speed-resume', 'adresume'), 2,
+                    lower(event) IN ('pause', 'speed-pause', 'adpause'), 4,
                     event_type = 'AppBackgrounded', 5,
                     event_type = 'AppForegrounded', 3,
                     event_type IN ('VideoError', 'VideoSessionEnd'), 6,

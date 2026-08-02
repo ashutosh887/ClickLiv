@@ -57,7 +57,7 @@ FROM
                     video_session_id,
                     t,
                     ord,
-                    argMax(coalesce(playing_signal, 0), if(playing_signal IS NULL, -1, ord)) OVER run
+                    argMax(coalesce(playing_signal, 1), if(playing_signal IS NULL, -1, ord)) OVER run
                         AND
                     argMax(coalesce(fg_signal, 1), if(fg_signal IS NULL, -1, ord)) OVER run
                         AS is_on
@@ -67,7 +67,14 @@ FROM
                         video_session_id,
                         t,
                         t * 8 + kind AS ord,
-                        multiIf(kind = 1, 0, kind = 2, 1, kind = 4, 0, kind = 6, 0, NULL)
+-- Playing defaults to on, and a session start asserts it. An extract is a window cut
+-- out of a longer stream, so a session already playing when the window opens emitted
+-- its VideoPlay before the first row and will never emit another. Defaulting to off
+-- made those sessions invisible until they happened to resume, which manufactured a
+-- 46 minute ramp on the sealed day where the data is flat: 2,552 rising to 18,161
+-- against a true 21,400. Pause, background, error and end all still switch it off, so
+-- every exclusion the problem statement names is unaffected.
+                        multiIf(kind = 1, 1, kind = 2, 1, kind = 4, 0, kind = 6, 0, NULL)
                             AS playing_signal,
                         multiIf(kind = 1, 1, kind = 3, 1, kind = 5, 0, NULL)
                             AS fg_signal
@@ -79,8 +86,8 @@ FROM
                             multiIf(
                                 event_type = 'VideoSessionStart', 1,
                                 event_type = 'VideoPlay'
-                                    OR event IN ('resume', 'speed-resume', 'AdResume'), 2,
-                                event IN ('pause', 'speed-pause', 'AdPause'), 4,
+                                    OR lower(event) IN ('resume', 'speed-resume', 'adresume'), 2,
+                                lower(event) IN ('pause', 'speed-pause', 'adpause'), 4,
                                 event_type = 'AppBackgrounded', 5,
                                 event_type = 'AppForegrounded', 3,
                                 event_type IN ('VideoError', 'VideoSessionEnd'), 6,

@@ -608,7 +608,7 @@ def vocabulary_check(events: dict, problems: list[str], warnings: list[str]) -> 
 
     for column, expected in VOCABULARY.items():
         seen = events["counters"][column]
-        known = [token for token in expected if token in seen]
+        known = [t for t in expected if t.lower() in {str(k).lower() for k in seen}]
         if not known and column == "event_type":
             problems.append(
                 f"none of the event_type values the sessionizer recognises "

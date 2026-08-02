@@ -137,7 +137,7 @@ def vocabulary_report(ch: ClickHouse) -> str:
         lines.append(f"\n{column + ' in raw_events':<{width + 16}}{'rows':>12}  recognised")
         for value, n in rows:
             lines.append(f"{str(value):<{width + 16}}{int(n):>12,}  "
-                         f"{'yes' if value in expected else 'no'}")
+                         f"{'yes' if str(value).lower() in {e.lower() for e in expected} else 'no'}")
         absent = [v for v in expected if v not in {r[0] for r in rows}]
         lines.append(f"\nrecognised {column} values absent from this file: "
                      + (", ".join(absent) if absent else "none, the vocabulary matches"))

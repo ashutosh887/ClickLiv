@@ -12,8 +12,8 @@ from pathlib import Path
 from .load import (CONTENT_OPTIONAL, CONTENT_TYPES, RAW_OPTIONAL, RAW_TYPES, open_text,
                    shape)
 
-PAUSE = frozenset({"pause", "speed-pause", "AdPause"})
-RESUME = frozenset({"resume", "speed-resume", "AdResume"})
+PAUSE = frozenset({"pause", "speed-pause", "adpause"})
+RESUME = frozenset({"resume", "speed-resume", "adresume"})
 STOP_TYPES = frozenset({"VideoError", "VideoSessionEnd"})
 
 VOCABULARY = {
@@ -53,9 +53,9 @@ def classify(event_type: str, event: str) -> int:
     """Kind doubles as the same-timestamp tie-break rank: deactivating events apply last."""
     if event_type == "VideoSessionStart":
         return START
-    if event_type == "VideoPlay" or event in RESUME:
+    if event_type == "VideoPlay" or event.lower() in RESUME:
         return PLAY
-    if event in PAUSE:
+    if event.lower() in PAUSE:
         return PAUSED
     if event_type == "AppBackgrounded":
         return BG
@@ -134,7 +134,7 @@ def active_intervals(events: list[Event], gap: int, grace: int) -> list[tuple[in
     """Active while playing, foregrounded, and heartbeat-fresh; any exit closes the
     segment at that event, a gap or stream end closes it one heartbeat later."""
     out: list[tuple[float, float]] = []
-    playing = False
+    playing = True
     foreground = True
     start: float | None = None
     last: float | None = None
@@ -146,7 +146,7 @@ def active_intervals(events: list[Event], gap: int, grace: int) -> list[tuple[in
 
         kind = event.kind
         if kind == START:
-            playing, foreground = False, True
+            playing, foreground = True, True
         elif kind == PLAY:
             playing = True
         elif kind == PAUSED:
