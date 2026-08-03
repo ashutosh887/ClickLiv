@@ -549,8 +549,16 @@ single rollup answer any filter combination.
 
 **Peak is not composable across time,** because `max` does not distribute over sums. The order
 of operations is therefore fixed: **filter, sum across the excluded dimensions, then take the
-max over minutes.** Never max first. `make crossover` reproduces the problem statement's own
-worked example through the served view.
+max over minutes.** Never max first.
+
+The problem statement gives its own worked example: "platform and a content might peak at one
+minute, while platform + country might reach its peak at an entirely different minute."
+`make crossover` reproduces it with real numbers through the served view rather than a
+hand-picked illustration. Five slices give **4 distinct peak minutes on the tuning extract and
+2 on the graded day**, where `platform=SONY_ANDROID_TV` peaks **45 minutes before** every other
+slice. One slice is enough to break the assumption, and a single dense day gives the effect
+less room than twelve days did. Fixing the order of operations is what makes the served view
+get this right without the caller thinking about it.
 
 ### Robust to duplicate and co-timestamped events by representation
 
@@ -864,17 +872,65 @@ PASS  instantaneous peak <= occupancy peak           20003 <= 22175, gap 2172
 Gate A: PASS  (12/12 checks)
 ```
 
-**Gate B**, `make gate-b`, rebuilds twice and asserts the serving tables are byte-identical
-across runs. **Gate C**, `make gate-c`, reloads against the busiest calendar day alone and
-runs the schema through chDB on that slice, so the sealed-dataset drop was rehearsed before
-it happened; it caught a real bug the first time it ran. **Gate D**, `make chdb`, needs no
-server at all: chDB 26.5.1.1 builds the whole pipeline in-process in 2.1 seconds and matches
-the served tables on `groupBitXor` over `cityHash64`, which is order independent, so the
-hashes pin contents and nothing about on-disk layout.
+- **Gate B**, `make gate-b`, rebuilds the pipeline twice and asserts the serving tables are
+  byte-identical across the two runs. On `clickliv_sample`, `minute_deltas` hash
+  `adcf745bdd90dde1`.
+- **Gate C**, `make gate-c`, reloads against the busiest calendar day alone and runs the schema
+  through chDB on that slice, so the sealed-dataset drop was rehearsed before it happened. It
+  caught a real bug the first time it ran.
+- **Gate D**, `make chdb`, needs no server at all. chDB 26.5.1.1 builds the whole pipeline
+  in-process in 2.1 seconds and matches the served tables:
+
+```
+PASS  minute_occupancy     98,034 rows  hash dc4550294e18a26a
+PASS  minute_deltas        35,849 rows  hash adcf745bdd90dde1
+PASS  active_intervals     32,562 rows  hash a366a631c835953f
+```
+
+The hashes are `groupBitXor` over `cityHash64`, which is order independent, so they pin the
+contents of the serving tables and nothing about how the rows are laid out on disk.
 
 Three ClickHouse runtimes run this project and each is named with where it came from:
 **26.4.1.2029** on Cloud, **26.7.1.1315** in local Docker, **26.5.1.1** embedded. Same SQL
 files, identical hashes.
+
+### Codecs, measured rather than assumed
+
+Every explicit `CODEC` in the schema was measured. Two of the original choices were actively
+costing storage, which only showed up once they were tested. The method is a controlled A/B:
+build the table twice from the same rows with the same sort key and partitioning, change only
+the codec, `OPTIMIZE FINAL` both, and read `data_compressed_bytes` from `system.parts`.
+
+| column | codec | compressed bytes |
+|---|---|---|
+| `raw_events.event_time` | `DoubleDelta, ZSTD(1)` | 2,107,768 |
+| | `ZSTD(1)` | 1,723,857 |
+| | **`Delta, ZSTD(1)`** | **1,525,866** |
+| `raw_events.content_id` | `T64, ZSTD(1)` | 302,171 |
+| | **`ZSTD(1)`** | **96,077** |
+| `raw_events.session_start` | `DoubleDelta, ZSTD(1)` | 164,727 |
+| | **`ZSTD(1)`** | **97,054** |
+
+Whole table, same 905,558 rows: **4,616,924 compressed bytes with the old codecs against
+3,725,521 with these, 19.3% smaller.**
+
+The reasons carry over to a new dataset where the numbers do not:
+
+- **`DoubleDelta`** wins on a near-constant stride and loses on anything jittery. Heartbeat
+  arrival times jitter at millisecond resolution, so the second-order delta is noise where the
+  first-order one is small and repetitive.
+- **`T64`** transposes bit planes assuming a narrow value range. `content_id` is a wide sparse
+  64-bit id, so the transposition destroys the byte runs `ZSTD` would have found.
+- **`session_start`** is one constant repeated for every event of a session, so it compresses
+  on repetition alone.
+- `DoubleDelta` stays on `minute`, and only there: a dense constant-stride integer, the shape
+  the codec exists for. It measures **143.81x against 39.71x** for plain `ZSTD` on
+  `minute_occupancy`.
+
+The lesson is not that `DoubleDelta` is bad. A codec is a claim about the shape of a column and
+has to be checked against that column. These are declarations rather than tuning, so a new
+dataset gets them for free, and re-checking the ranking is one `estimateCompressionRatio` query
+per column.
 
 ### Threshold sensitivity
 
@@ -915,6 +971,34 @@ depend on the guess, which is a stronger result than arguing for one value.
   overlap.
 - The merge returns exactly **177,372 intervals**, the same segment count as `active_intervals`
   and as the Python reference, so it validates itself rather than being taken on trust.
+
+### Why no approximate cardinality estimator ships
+
+`uniqTheta` and `uniqCombined64` were the obvious things to reach for and neither earned its
+place. Counted over the sealed day's `raw_events`, memory read through
+`clusterAllReplicas(default, system.query_log)`:
+
+| function | distinct users | error | memory |
+|---|---|---|---|
+| `uniqExact` | 82,958 | 0.000% | 52.2 MB |
+| `uniq` | 82,934 | 0.029% | 52.2 MB |
+| `uniqCombined64` | 83,132 | 0.210% | 52.2 MB |
+| `uniqTheta` | 83,800 | 1.015% | 52.2 MB |
+
+All four converge on the same memory, because **the scan of 7,000,000 rows dominates, not the
+estimator's hash state**. An approximate estimator buys nothing here and spends accuracy on a
+headline number. The crossover is real but far away, and it was measured rather than guessed:
+
+| distinct values | `uniqExact` memory | `uniqCombined64` memory |
+|---|---|---|
+| 10,000 | 7.1 MB | 5.6 MB |
+| 1,000,000 | 152.4 MB | 5.9 MB |
+| 100,000,000 | 7,559.6 MB | 6.0 MB |
+
+So the rule the project follows: **exact while the distinct count is in the tens of thousands**,
+which is where these counts sit, and `uniqCombined64` rather than `uniqTheta` if a future slice
+ever passes a million, because it was both more accurate and no more expensive at every size
+tested.
 
 ### Two datasets, one contract
 
