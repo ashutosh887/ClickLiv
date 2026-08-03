@@ -1,42 +1,73 @@
-# DevSapiens
+# ClickLiv
 
-## Track
+**Foreground-only concurrent viewers for streaming telemetry, on ClickHouse.**
 
-SonyLIV. Counting the crowd: foreground-only concurrency at streaming scale.
+[Live demo](https://clickliv.vercel.app) · [Quick start](#quick-start) ·
+[How it works](#architecture) · [Reference](#reference)
 
-## Project
+---
 
-**ClickLiv**, foreground-only concurrent viewers for SonyLIV streaming telemetry, on
-ClickHouse.
+**An open app is not a viewer.** A session counts as concurrent only while it is **playing**,
+**foregrounded** and **heartbeat-fresh**. Counting every open session instead is the mistake
+this project exists to remove and measure.
 
-## Team Members
-
-- Ashutosh Jha ([@ashutosh887](https://github.com/ashutosh887))
-- Mansi Sondhi ([@weirdcoder26](https://github.com/weirdcoder26))
-
-## What it does
-
-An open app is not a viewer. A session counts as concurrent only while it is **playing**,
-**foregrounded** and **heartbeat-fresh**.
-
-On the graded day, 7,000,000 events from 2026-07-31, counting every open session instead
-reports **24,196** concurrent viewers in the busiest minute where **22,175** were actually
-watching. That is **2,021 phantom viewers in a single minute**. At live-sport scale those
-are the people capacity gets provisioned for and ad inventory gets priced against, and they
+On 7,000,000 events from a single day, the naive count reports **24,196** concurrent viewers in
+the busiest minute where **22,175** were actually watching. Those **2,021 phantom viewers in one
+minute** are who capacity gets provisioned for and ad inventory gets priced against, and they
 are not watching anything.
 
-| Graded day, 2026-07-31 | Foreground-only | Naive, every open session |
+| Busiest minute, 2026-07-31 | Foreground-only | Naive, every open session |
 |---|---|---|
 | Peak concurrent viewers | **22,175** | 24,196, **9.1% high** |
 | Average concurrent viewers | **895.9** | 1,703.2, **90.1% high** |
 | Minute the peak lands in, UTC | 11:16 | 11:16, the same minute |
 
-ClickLiv ingests raw session telemetry into ClickHouse, reconstructs the truly active
-playback intervals inside every session, rolls them to one row per session-minute, and
-serves peak and average concurrency at any grain under any combination of filters from that
-one rollup. It absorbs still-open sessions incrementally as heartbeats keep arriving, and it
-exposes the same numbers through a web dashboard, a conversational surface and an MCP
-server, all reading through one budgeted read-only role.
+ClickLiv ingests raw session telemetry into ClickHouse, reconstructs the truly active playback
+intervals inside every session, rolls them to one row per session-minute, and serves peak and
+average concurrency at any grain under any combination of filters from that one rollup. It
+absorbs still-open sessions incrementally as heartbeats keep arriving, and exposes the same
+numbers through a web dashboard, a conversational surface and an MCP server, all reading
+through one budgeted read-only role.
+
+**ClickHouse is the only datastore.** Every stage of the model, from sessionization to the
+served view, runs inside it.
+
+---
+
+## Contents
+
+- [Highlights](#highlights) — the short version of every claim, with where it is argued
+- [Demo](#demo) · [Results](#results) · [Quick start](#quick-start)
+- [The OSS stack](#the-oss-stack) — ClickStack, Langfuse, LibreChat, MCP
+- [Correctness](#correctness) — five independent paths, four gates
+- [Versus a presence sketch](#versus-a-presence-sketch) — the competing design, built and diffed
+- [The concurrency curve](#the-concurrency-curve) · [Architecture](#architecture) ·
+  [The model](#the-model)
+- [Serving](#serving) · [Update handling](#update-handling) · [Scale](#scale) ·
+  [Built for unseen data](#built-for-unseen-data)
+- [Limitations](#limitations) — what does not work, stated plainly
+- [Reference](#reference) — gates, codecs, thresholds, datasets, evidence, observability
+- [About](#about) · [Licence](#licence)
+
+---
+
+## Highlights
+
+Every claim in one line, with where it is argued and measured.
+
+| | Where |
+|---|---|
+| **All three OSS pillars carry load**, plus the ClickHouse MCP server. Langfuse is a second ClickHouse workload rather than a name-drop: traces in this project's own Cloud service on `SharedMergeTree`, state in ClickHouse managed Postgres. | [OSS stack](#the-oss-stack) |
+| **Five independent implementations, four gates.** Three ClickHouse runtimes and a Python reference that reads the CSV and owes ClickHouse nothing agree hash for hash. | [Correctness](#correctness) |
+| **The competing design was built, not dismissed.** A session-independent heartbeat-presence sketch, run on the same day and diffed cell by cell: 22,718 against our 22,175, and every session-minute of the gap is paused playback a presence model structurally cannot see. | [Versus a presence sketch](#versus-a-presence-sketch) |
+| **Read cost is flat in the number of filters.** The served query reads the 704,123-row rollup, never the 7,000,000 events, and going from zero filters to eight costs 2,925 extra rows rather than eight more scans. | [Serving](#serving) |
+| **Updates are incremental.** A materialized view extends still-open sessions on every insert with no rebuild, exercised for real on a day that is 34.7% still-open sessions. | [Update handling](#update-handling) |
+| **Every threshold is a measurement, not a guess.** The two that remain guesses are swept across a grid; peak moves 0.4% across the whole of it and the peak minute never moves. | [The model](#the-model) |
+| **Sharding is exact by construction.** Eight independent shards computed alone and summed reproduce the server's peak and its full minute series. | [Scale](#scale) |
+| **Built for data it had never seen.** The graded drop arrived with two new columns and needed no code change. Preflighted before anything is dropped, snapshotted so a failure is seconds from rollback. | [Unseen data](#built-for-unseen-data) |
+| **The serving SLO is missed and said so.** p99 is 124 ms against a self-imposed 100 ms, on an instance at its 4-thread floor holding 7.7x the data it was tuned on. | [Limitations](#limitations) |
+
+---
 
 ## Demo
 
@@ -62,34 +93,14 @@ every grain, live in the page and needing no database behind it.
   that implementations sharing no code must agree.
 
 LibreChat, Langfuse and ClickStack run from a clone, one command each.
-[How to run it](#how-to-run-it) has them.
-
-## Demo Video
-
-**<https://youtu.be/RCbLC5MoHrw>**, a 3 minute walkthrough, recorded while the hosted demo was
-live. Deck: [`docs/pitch-deck.pdf`](docs/pitch-deck.pdf).
-
----
-
-## Where each judging criterion is answered
-
-| Criterion | The short answer | Section |
-|---|---|---|
-| ClickHouse and the OSS stack | All three OSS pillars, plus the ClickHouse MCP server. Langfuse is a second ClickHouse workload, not a name-drop: its traces live in this project's own Cloud service on SharedMergeTree, its state in ClickHouse managed Postgres. | [OSS stack](#the-oss-stack) |
-| Correctness against the private key | Five independent implementations of the same question, diffed by four gates. Three ClickHouse runtimes and a Python reference that reads the CSV and owes ClickHouse nothing agree hash for hash. | [Correctness](#correctness-five-paths-then-diff-them) |
-| Innovation, against the obvious alternative | We built the competing design, a session-independent heartbeat-presence sketch, ran it on the graded day and diffed it cell by cell. It reads 22,718 against our 22,175, and every session-minute of the gap is paused playback a presence model structurally cannot see. | [Versus a presence sketch](#how-clickliv-differs-from-a-presence-sketch) |
-| Query performance, and what the queries read | The served query reads the 704,123-row rollup, never the 7,000,000 events, and read cost is flat in the number of filters: zero filters to eight costs 2,925 extra rows, not eight more scans. p99 on the graded day is 124 ms, which **misses** our self-imposed 100 ms on a Cloud instance at its 4 thread floor. | [Serving](#serving-one-parameterized-view-behind-a-budgeted-role) |
-| Update handling | A materialized view extends still-open sessions on every insert with no rebuild, and the graded day is 34.7% still-open sessions, so this is exercised for real rather than by fixture. | [Update handling](#update-handling-incrementally-rather-than-by-rebuild) |
-| Design quality and the trade-offs | Every threshold derives from a measurement of this data rather than from the data dictionary, and the two that remain guesses are swept across a grid rather than defended. | [The model](#the-model-and-the-measurement-that-forced-each-decision) |
-| Scalability, and behaviour at 100x | Sharding is exact by construction. Eight independent shards computed alone and summed reproduce the server's peak and its full minute series. | [Scale](#scale-and-what-happens-at-100x) |
-| The unseen day | One command, preflighted before anything is dropped, snapshotted so a failure is seconds from rollback, rehearsed against adversarial fixtures and a held-out real day. | [Unseen day](#built-for-the-unseen-day) |
+[Quick start](#quick-start) has them.
 
 ---
 
 ## Results
 
 The graded SonyLIV drop is the source of truth. The tuning extract is published beside it,
-rebuilt this morning under the same code, so both columns come from one pipeline rather than
+rebuilt under the same code, so both columns come from one pipeline rather than
 two models called one. Every figure below is produced by a query this repository ran, tagged
 with a `query_id` and traceable to `system.query_log`.
 
@@ -150,7 +161,7 @@ Both datasets stay queryable. The graded data builds into the `clickliv` databas
 `clickliv_sample` behind `marts_clickliv_sample`: same views, same parameters, same
 restricted role. See [Reference: two datasets](#two-datasets-one-contract).
 
-### Why the correction is 9.1% here and was roughly four times that on the extract
+### Why the correction is 9.1% here and four times that on the extract
 
 The tuning extract gives a much larger peak overcount than the graded day, and puts the
 naive peak in a different minute from the real one where the graded day puts both in the
@@ -181,6 +192,79 @@ is not the model. The same eight queries read the same rollup, but the service i
 7.7 times the data on a ClickHouse Cloud instance sitting at its 4 thread and 16 GiB floor
 against a 120 GB ceiling. The fix is a slider, which is the kind of fix a design wants to
 have.
+
+---
+
+## Quick start
+
+Everything runs on localhost. No hosted service, no account and no card, and the defaults in
+`.env.example` are the local ones.
+
+```sh
+git clone https://github.com/ashutosh887/ClickLiv && cd ClickLiv
+cp .env.example .env
+make data                 # fetch the two source CSVs; data/ is gitignored
+make up && make all       # ClickHouse in Docker, then CSV to Gate A, about 11 seconds
+```
+
+`make all` finishes by printing the 12 cross-path checks. That is the whole correctness claim,
+and it needs nothing beyond the three commands above.
+
+Point `.env` at a ClickHouse Cloud service instead of running `make up` to use a hosted one.
+Every command works unchanged either way, which is the reason the block exists in
+`.env.example` at all.
+
+### One command per surface
+
+| Command | Brings up | Needs first |
+|---|---|---|
+| `make up` | ClickHouse on <http://localhost:8123> | nothing |
+| `make ui` | The dashboard on <http://localhost:8090> | `make all`, then `make marts` |
+| `make mcp` | The MCP server on <http://localhost:8765> | `make marts` |
+| `make obs-up` | ClickStack on <http://localhost:8080> | nothing |
+| `make chat-up` | LibreChat on <http://localhost:3080> | `make mcp`, and four generated secrets |
+| `make llm-up` | Langfuse on <http://localhost:3300> | a Postgres, an S3 bucket, a model key |
+
+Each has a matching `down`: `make down`, `make obs-down`, `make chat-down`, `make llm-down`.
+Volumes survive a `down`, so the next `up` still has its data.
+
+| Target | What it does |
+|---|---|
+| `make all` | Build the whole pipeline and run **Gate A**, 12 cross-path checks |
+| `make chdb` | **Gate D**, the whole pipeline in-process with chDB, no server, same hashes |
+| `make marts` | The parameterized serving view, the role and the query budget |
+| `make answers` | The benchmark answer set through `marts`, plus latencies and EXPLAIN |
+| `make web-snapshot` | Freeze the served marts into `web/snapshot`, verified against the views |
+| `make claims` | Re-read every published figure live and name any document stating a superseded one |
+| `make unseen RAW= CONTENT=` | The sealed-dataset run: answers, latencies, evidence, comparison table |
+| `make test` | 104 tests, in under a second |
+
+There are fifty-three targets in all; a read of the `Makefile` lists the rest.
+
+### Credentials, and what creates each one
+
+No secret is committed. `.env` is gitignored, and `.env.example` is an annotated template that
+carries the exact SQL and `openssl` line beside every block. Nothing below reaches a browser:
+the web API pins the username and the database in `web/api/_clickhouse.js`, so no environment
+setting can widen them.
+
+- **ClickHouse itself.** `docker-compose.yml` creates the `clickliv` user on first start. Those
+  three values are fixed in the compose file, so the `CH_USER`, `CH_PASSWORD` and `CH_DATABASE`
+  in `.env` have to match them. They already do.
+- **`marts_agent`,** the read-only role every consumer authenticates as. Created by
+  `make marts` from `MARTS_PASSWORD`, granted `SELECT` on the marts schema and nothing else,
+  under a settings profile that caps execution time, memory and rows read. Change
+  `MARTS_PASSWORD` before you run it; the shipped value is deliberately `Change-Me-1!`, and
+  Cloud rejects anything without an uppercase letter, a digit and a symbol.
+- **`mcp_agent`,** the same idea for the MCP surface with its own budget. Created once by hand
+  rather than on every run, so the SQL sits in `.env.example`.
+- **LibreChat** needs four secrets it cannot generate itself. `openssl rand -hex 32` for three
+  of them, `openssl rand -hex 16` for the IV.
+- **Langfuse** needs a Postgres URL, an S3 bucket for event blobs, and a model key. Leave
+  `LANGFUSE_HOST` unset and the sink is simply off, which is what you want if you only came for
+  the pipeline.
+- **Model keys are optional throughout.** With none set, everything is deterministic and the
+  only thing missing is one narration line in `make decline`.
 
 ---
 
@@ -236,7 +320,7 @@ detects a concurrency decline and narrates the likely cause.
 
 ---
 
-## Correctness: five paths, then diff them
+## Correctness
 
 Two paths that agree is a claim no single path can make.
 
@@ -279,7 +363,7 @@ zero runtime dependencies.
 
 ---
 
-## How ClickLiv differs from a presence sketch
+## Versus a presence sketch
 
 The obvious model for this problem is a presence sketch: an `AggregatingMergeTree` of
 `uniqExactState(video_session_id)` fed by a materialized view, counting a session in a minute
@@ -331,7 +415,7 @@ watched. Method and the full disagreement table are in
 
 ---
 
-## The concurrency curve, and the SQL behind it
+## The concurrency curve
 
 The curve is in the product at **[clickliv.vercel.app](https://clickliv.vercel.app)**:
 foreground-only concurrency over the whole window, the naive open-session curve drawn behind
@@ -404,7 +488,7 @@ Its second job is index pruning, and here the committed evidence limits what we 
 `session_minutes` underneath holds one row per active session-minute, produced by
 `sql/02_sessionize.sql` and `sql/03_occupancy.sql`. What counts as active, and the
 measurement that forced each part of that rule, is
-[the model](#the-model-and-the-measurement-that-forced-each-decision).
+[the model](#the-model).
 
 ### Which dataset column backs each filter
 
@@ -488,7 +572,7 @@ Python reference, which exists precisely so that it can disagree.
 
 ---
 
-## The model, and the measurement that forced each decision
+## The model
 
 The characterizations in this section were measured on the tuning extract, where the
 behaviour was first found. The rules they produced are unchanged on the graded day, and the
@@ -581,7 +665,7 @@ hot path.
 
 ---
 
-## Serving: one parameterized view, behind a budgeted role
+## Serving
 
 The benchmark question shapes are private, so rather than guess the wording, `marts` answers
 any (dimension filter, time range, grain) combination through one parameterized view called as
@@ -650,7 +734,7 @@ generated before each query ran, re-measured 2026-08-02:
 
 ---
 
-## Update handling, incrementally rather than by rebuild
+## Update handling
 
 Update handling is a named evaluation criterion, and the graded day is where it stops being
 hypothetical: **37,649 of its 108,486 sessions, 34.7%, are still open when the file ends.**
@@ -668,7 +752,7 @@ a permanent tax on every other command.
 
 ---
 
-## Scale, and what happens at 100x
+## Scale
 
 **Sharding is exact by construction.** `make scale`. Sessionization never lets a session cross
 a shard boundary, so splitting across 8 independent chDB instances by
@@ -683,7 +767,7 @@ scaling, and `evidence/scale.txt` says so. The 100x proxy also skips the window-
 sessionizer so it finishes in minutes, so its concurrency numbers are not the pipeline's and
 are published nowhere.
 
-The honest limit is the one we hit today: the serving layer's read pattern is right, and the
+The honest limit is the one we hit: the serving layer's read pattern is right, and the
 instance is small. Going from the extract to 7.7x the data on a 4 thread floor moved p99 from
 under 60 ms to 124 ms. Nothing about that is the model, and nothing about it is fixed by
 changing the model.
@@ -694,7 +778,7 @@ to 0.00% error.
 
 ---
 
-## Built for the unseen day
+## Built for unseen data
 
 The sealed evaluation dataset arrives in the final hours and hand-computed answers score
 nothing.
@@ -731,80 +815,7 @@ The runbook is [Reference: the sealed day](#the-sealed-day-as-it-happened).
 
 ---
 
-## How to run it
-
-Everything runs on localhost. No hosted service, no account and no card, and the defaults in
-`.env.example` are the local ones.
-
-```sh
-git clone https://github.com/ashutosh887/ClickLiv && cd ClickLiv
-cp .env.example .env
-make data                 # fetch the two source CSVs; data/ is gitignored
-make up && make all       # ClickHouse in Docker, then CSV to Gate A, about 11 seconds
-```
-
-`make all` finishes by printing the 12 cross-path checks. That is the whole correctness claim,
-and it needs nothing beyond the three commands above.
-
-Point `.env` at a ClickHouse Cloud service instead of running `make up` to use a hosted one.
-Every command works unchanged either way, which is the reason the block exists in
-`.env.example` at all.
-
-### One command per surface
-
-| Command | Brings up | Needs first |
-|---|---|---|
-| `make up` | ClickHouse on <http://localhost:8123> | nothing |
-| `make ui` | The dashboard on <http://localhost:8090> | `make all`, then `make marts` |
-| `make mcp` | The MCP server on <http://localhost:8765> | `make marts` |
-| `make obs-up` | ClickStack on <http://localhost:8080> | nothing |
-| `make chat-up` | LibreChat on <http://localhost:3080> | `make mcp`, and four generated secrets |
-| `make llm-up` | Langfuse on <http://localhost:3300> | a Postgres, an S3 bucket, a model key |
-
-Each has a matching `down`: `make down`, `make obs-down`, `make chat-down`, `make llm-down`.
-Volumes survive a `down`, so the next `up` still has its data.
-
-| Target | What it does |
-|---|---|
-| `make all` | Build the whole pipeline and run **Gate A**, 12 cross-path checks |
-| `make chdb` | **Gate D**, the whole pipeline in-process with chDB, no server, same hashes |
-| `make marts` | The parameterized serving view, the role and the query budget |
-| `make answers` | The benchmark answer set through `marts`, plus latencies and EXPLAIN |
-| `make web-snapshot` | Freeze the served marts into `web/snapshot`, verified against the views |
-| `make claims` | Re-read every published figure live and name any document stating a superseded one |
-| `make unseen RAW= CONTENT=` | The sealed-dataset run: answers, latencies, evidence, comparison table |
-| `make test` | 104 tests, in under a second |
-
-There are fifty-three targets in all; a read of the `Makefile` lists the rest.
-
-### Credentials, and what creates each one
-
-No secret is committed. `.env` is gitignored, and `.env.example` is an annotated template that
-carries the exact SQL and `openssl` line beside every block. Nothing below reaches a browser:
-the web API pins the username and the database in `web/api/_clickhouse.js`, so no environment
-setting can widen them.
-
-- **ClickHouse itself.** `docker-compose.yml` creates the `clickliv` user on first start. Those
-  three values are fixed in the compose file, so the `CH_USER`, `CH_PASSWORD` and `CH_DATABASE`
-  in `.env` have to match them. They already do.
-- **`marts_agent`,** the read-only role every consumer authenticates as. Created by
-  `make marts` from `MARTS_PASSWORD`, granted `SELECT` on the marts schema and nothing else,
-  under a settings profile that caps execution time, memory and rows read. Change
-  `MARTS_PASSWORD` before you run it; the shipped value is deliberately `Change-Me-1!`, and
-  Cloud rejects anything without an uppercase letter, a digit and a symbol.
-- **`mcp_agent`,** the same idea for the MCP surface with its own budget. Created once by hand
-  rather than on every run, so the SQL sits in `.env.example`.
-- **LibreChat** needs four secrets it cannot generate itself. `openssl rand -hex 32` for three
-  of them, `openssl rand -hex 16` for the IV.
-- **Langfuse** needs a Postgres URL, an S3 bucket for event blobs, and a model key. Leave
-  `LANGFUSE_HOST` unset and the sink is simply off, which is what you want if you only came for
-  the pipeline.
-- **Model keys are optional throughout.** With none set, everything is deterministic and the
-  only thing missing is one narration line in `make decline`.
-
----
-
-## What does not work, and what we are not claiming
+## Limitations
 
 Calibrated honesty is cheaper than a discovered overstatement.
 
@@ -1120,8 +1131,24 @@ still fail as a tile. The one deliberate exception to reading `query_log` throug
 
 ---
 
-Built by **DevSapiens** for the ClickHouse Click-a-thon 2026, SonyLIV foreground-only
-concurrency track.
+## About
+
+Built by **DevSapiens** for the **ClickHouse Click-a-thon 2026**, on the SonyLIV track:
+*Counting the crowd, foreground-only concurrency at streaming scale.* The dataset is synthetic
+streaming telemetry supplied by the organisers, and the figures throughout are from the sealed
+evaluation drop released in the final hours of the event.
+
+**Team**
+
+- Ashutosh Jha ([@ashutosh887](https://github.com/ashutosh887))
+- Mansi Sondhi ([@weirdcoder26](https://github.com/weirdcoder26))
+
+**Walkthrough and deck**
+
+- [3 minute video walkthrough](https://youtu.be/RCbLC5MoHrw), recorded against the hosted demo
+- [`docs/pitch-deck.pdf`](docs/pitch-deck.pdf)
+
+---
 
 ## Licence
 
