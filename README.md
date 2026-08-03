@@ -40,37 +40,29 @@ server, all reading through one budgeted read-only role.
 
 ## Demo
 
-**[clickliv.vercel.app](https://clickliv.vercel.app)** is up, and needs nothing running behind
-it.
+**[clickliv.vercel.app](https://clickliv.vercel.app)** — the concurrency curve, every filter,
+every grain, live in the page and needing no database behind it.
 
-The Click-a-thon is over, so the hosted infrastructure is gone: the Cloud service is stopped,
-the EC2 instance that carried LibreChat, Langfuse and ClickStack is terminated. Rather than
-leave a dashboard pointing at a database that is not there, `make web-snapshot` froze the
-served marts into `web/snapshot` first.
-
-**What the page is now**
-
-- The **704,123-row rollup**, packed as 16-bit columns and gzipped to **2 MB**, plus the
-  catalogue, the titles and the naive series.
+- The full **704,123-row rollup** ships with the page, packed as 16-bit columns and gzipped to
+  **2 MB**, alongside the catalogue, the titles and the naive series.
 - Every filter, grain and slice is **recomputed in the browser** from that rollup. It is the
   graded data answering your query, not a screenshot of it.
-- A **Live** toggle switches back to the `/api` routes for anyone running the project
-  themselves.
+- A **Live** toggle switches to the `/api` routes for anyone running the project themselves.
 - The deployment holds **no credential of any kind**, and with none set the API fails closed
   rather than open.
 
-**Why the snapshot can be trusted**
+**Why it can be trusted**
 
 - `make web-snapshot` refuses to write unless the peak, the minute count and every dimension
   value it encodes match the marts views it just read.
-- The browser engine was then diffed against ClickHouse across **twelve filter and grain
-  combinations plus the headline**. All thirteen agreed exactly, including the
-  case-insensitive value fallback the parameterized view performs.
+- The browser engine was diffed against ClickHouse across **twelve filter and grain
+  combinations plus the headline**. All thirteen agreed exactly, including the case-insensitive
+  value fallback the parameterized view performs.
 - That makes it the **sixth independent implementation** in a project whose central claim is
   that implementations sharing no code must agree.
 
-The three self-hosted surfaces now run from a clone. [How to run it](#how-to-run-it) has the
-command for each.
+LibreChat, Langfuse and ClickStack run from a clone, one command each.
+[How to run it](#how-to-run-it) has them.
 
 ## Demo Video
 
@@ -1128,22 +1120,8 @@ still fail as a tile. The one deliberate exception to reading `query_log` throug
 
 ---
 
-## Afterwards
-
 Built by **DevSapiens** for the ClickHouse Click-a-thon 2026, SonyLIV foreground-only
-concurrency track. It did not place in the top ten.
-
-The infrastructure came down the same day: the ClickHouse Cloud service is stopped with its
-data intact, the managed Postgres and the EC2 instance that carried the self-hosted surfaces
-are gone, the Elastic IP is released, and every credential has been removed from every hosted
-environment. What is left costs nothing to keep and asks nothing of anyone reading it.
-
-The repository is the artifact now, and it is a complete one. Three commands reproduce the
-whole pipeline and its twelve cross-path checks from a clean clone. The graded answers,
-latencies and evidence are committed under `answers/`, `evidence/` and `submission/`, each with
-a `query_id` that can be checked against the run it came from. The dashboard still answers
-arbitrary slices without a database behind it. The numbers were right when they were measured
-and they are still reproducible, which was the point of building it this way.
+concurrency track.
 
 ## Licence
 

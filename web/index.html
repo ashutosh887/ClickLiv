@@ -456,10 +456,9 @@
 
   <section id="surfaces">
     <h2>Surfaces</h2>
-    <p class="lede">The hosted deployments were stopped after the Click-a-thon, so nothing here
-    bills and no credential exists in production. The dashboard still works, from a snapshot of
-    the graded dataset captured before the service was stopped. Every other surface runs from a
-    clean clone with one command.</p>
+    <p class="lede">The dashboard runs on a verified snapshot of the graded dataset, so it needs
+    no database and holds no credential. Every other surface comes up from a clean clone with one
+    command.</p>
     <div class="cards">
       <a class="card" href="/dashboard">
         <h3>Concurrency dashboard</h3>
@@ -602,8 +601,8 @@ function fill(data) {
 
   $('claimStatus').innerHTML = data.captured_utc
     ? `<span class="live stale">snapshot</span> &nbsp;dataset <code>${data.dataset}</code>,`
-      + ` captured from <code>${data.schema}.v_overcount</code> on ${data.captured_utc} UTC,`
-      + ' before the hosted service was stopped.'
+      + ` captured from <code>${data.schema}.v_overcount</code> on ${data.captured_utc} UTC`
+      + ' and verified against the served views.'
     : `<span class="live">live</span> &nbsp;dataset <code>${data.dataset}</code>, read from`
       + ` <code>${data.schema}.v_overcount</code> in ${fmt(data.server_ms)} ms of ClickHouse`
       + ' server time.';

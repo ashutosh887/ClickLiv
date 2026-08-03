@@ -643,10 +643,10 @@ async function describeSource() {
   }
   try {
     const about = await frozen.about();
-    $('notice').innerHTML = '<b>Snapshot mode.</b> The hosted ClickHouse Cloud service was '
-      + `stopped after Click-a-thon 2026. This page is reading a snapshot of ${about.schema} `
-      + `captured ${about.captured_utc} UTC, ${fmt(about.rows)} rollup rows, and every number `
-      + 'below is recomputed in your browser from it. Filters, grains and slices all work. '
+    $('notice').innerHTML = '<b>Snapshot mode.</b> This page carries the full '
+      + `${fmt(about.rows)}-row rollup from <code>${about.schema}</code>, captured `
+      + `${about.captured_utc} UTC and verified against the marts views. Every filter, grain `
+      + 'and slice below is recomputed in your browser, with no database behind the page. '
       + 'Switch to Live to read a ClickHouse you are running yourself.';
   } catch (error) {
     $('notice').textContent = `The snapshot could not be loaded: ${error.message}`;
