@@ -5,7 +5,7 @@ CREATE TABLE session_minutes
 -- DoubleDelta stays on minute and only on minute: it is a dense near-constant-stride
 -- integer, which is the one shape DoubleDelta is built for, and it measures 143.81x
 -- against 39.71x for plain ZSTD on minute_occupancy. T64 comes off content_id for the
--- reason given in 01_schema.sql. Measurements in docs/scale.md#codecs.
+-- reason given in 01_schema.sql. Measurements in the Reference section of README.md.
     video_session_id  String CODEC(ZSTD(1)),
     minute            UInt32 CODEC(DoubleDelta, ZSTD(1)),
     platform          LowCardinality(String),

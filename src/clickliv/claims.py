@@ -10,7 +10,7 @@ from .ch import ClickHouse
 
 BASELINE = Path("artifacts/claims_baseline.json")
 
-DOCS = ["README.md", "docs", "localdocs/script.md", "web/index.html"]
+DOCS = ["README.md", "localdocs/script.md", "web/index.html"]
 
 
 def measure(ch: ClickHouse) -> dict:

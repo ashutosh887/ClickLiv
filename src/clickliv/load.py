@@ -1,5 +1,5 @@
 """CSV ingestion. Content lands before events (D12), asserted rather than assumed, and
-the header in hand decides the input schema. See docs/unseen-day.md."""
+the header in hand decides the input schema. See the sealed-day section of README.md."""
 
 from __future__ import annotations
 

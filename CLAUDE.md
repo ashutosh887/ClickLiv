@@ -109,7 +109,8 @@ queryable from one schema.
 
 - No comments in Python, shell or JavaScript. SQL keeps the comments that record a
   measurement or justify a trade-off, because that is the reasoning a reader needs.
-- Docstrings are one or two lines. Longer explanations belong in `docs/`.
+- Docstrings are one or two lines. Longer explanations belong in the README, which is the
+  only prose document; `docs/` holds the pitch deck and nothing else.
 - No file, dependency or abstraction that is not needed. Delete dead code on sight.
 - Every published number must be reproducible. `make claims` reads them live and names
   any document stating a superseded value.

@@ -6,7 +6,7 @@ CREATE TABLE active_intervals
     segment_id       UInt32,
 -- Segment boundaries are millisecond epochs ordered by session, not by time, so
 -- consecutive values jump arbitrarily and neither delta stage pays for itself.
--- Measured: DoubleDelta 2.00x, Delta 2.18x, plain ZSTD 2.25x (docs/scale.md#codecs).
+-- Measured: DoubleDelta 2.00x, Delta 2.18x, plain ZSTD 2.25x (the Reference section of README.md).
     ts_start_ms      Int64 CODEC(ZSTD(1)),
     ts_end_ms        Int64 CODEC(ZSTD(1))
 )

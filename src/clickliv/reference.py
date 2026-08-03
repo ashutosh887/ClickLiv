@@ -268,7 +268,7 @@ def build(raw_path: Path, content_path: Path) -> dict:
         raise SystemExit(
             f"{raw_path} has {len(sessions)} session(s) but none of them is ever active. "
             "Check GAP_SECONDS/GRACE_SECONDS and that event_type/event use the expected "
-            "vocabulary; see docs/unseen-day.md.")
+            "vocabulary; see the sealed-day section of README.md.")
 
     peak_minute = max(totals, key=lambda m: (totals[m], -m))
     inst_peak, inst_at = instantaneous_peak(all_intervals)

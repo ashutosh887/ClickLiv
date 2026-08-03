@@ -50,7 +50,7 @@ def minute_bounds(ch: ClickHouse) -> tuple[int, int]:
     if lo is None or hi is None:
         raise SystemExit(
             "minute_occupancy is empty, so there is no minute range to answer over. "
-            "The load or the sessionizer produced nothing; see docs/unseen-day.md.")
+            "The load or the sessionizer produced nothing; see the sealed-day section of README.md.")
     return int(lo), int(hi)
 
 

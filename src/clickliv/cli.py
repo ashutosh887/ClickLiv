@@ -169,7 +169,7 @@ def step_sessionize(ch: ClickHouse) -> int:
     print(vocabulary_report(ch))
     print("\n      Fix the vocabulary in sql/02_sessionize.sql and the matching "
           "classify() in src/clickliv/reference.py, or map the tokens upstream. "
-          "See docs/unseen-day.md.")
+          "See the sealed-day section of README.md.")
     return 1
 
 

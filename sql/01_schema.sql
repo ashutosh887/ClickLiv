@@ -30,7 +30,7 @@ LIFETIME(MIN 300 MAX 600);
 
 CREATE TABLE IF NOT EXISTS raw_events
 (
--- Codecs here are measured, not assumed; see docs/scale.md#codecs. Delta beats
+-- Codecs here are measured, not assumed; see the Reference section of README.md. Delta beats
 -- DoubleDelta on event_time because millisecond heartbeat arrival jitters, so the
 -- second-order delta is noise where the first-order one is small and repetitive.
 -- content_id is a wide sparse UInt64, which is the case T64 is worst at: transposing
